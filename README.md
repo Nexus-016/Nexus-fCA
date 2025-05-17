@@ -1,59 +1,49 @@
 <div align="center">
 
-![20241210_183831](https://i.ibb.co/LzkQMGWz/Future-Studio-Synthwave-Logo-Future-Studio-Synthwave-Logo.png)
+![20241210_183831](https://ibb.co/qMy0zZfM)
 
 <h2 align="center"><b>Nexus-FCA: Advanced Facebook Chat API</b></h2>
 
 ---
 
-## 🚀 What's New & Why Nexus-FCA is Better
-
-- **Professional Console Banner:**
-  - Beautiful blue-cyan gradient banner and info logs for a modern, premium look every time you start Nexus-FCA.
-- **Clean, Modern Branding:**
-  - All legacy/old credits and placeholders removed. 100% Nexus-FCA, 100% professional.
-- **Advanced Feature Set:**
-  - Combines and upgrades the best modules from multiple FCA forks for maximum compatibility and features.
-  - Every feature is documented in the `docs/` folder with real usage examples.
-- **Safe & Testable:**
-  - All legacy/unsafe code removed. No more version-check errors or startup spam.
-  - Test script (`test_all_features.js`) lets you safely test every feature live in Messenger.
-- **Better Error Handling:**
-  - Cleaner error messages, no more huge dumps for simple issues.
-- **Admin & Safety Tools:**
-  - Global rate limiting, allow/block lists, and Safe Mode for extra account protection.
-- **Easy to Use:**
-  - Simple login with `appstate.json`. No password needed after first login.
-  - All features accessible via a clean API and Messenger bot commands.
-- **Actively Maintained:**
-  - Frequent updates, bug fixes, and new features.
+Nexus-FCA is a modern, safe, and advanced Facebook Chat API for Node.js. It is designed for developers who want a reliable, easy-to-use, and actively maintained solution for Messenger automation, bots, and integrations.
 
 ---
 
-> **Professional Console Banner:**
-> When you start Nexus-FCA, you'll see a beautiful blue-cyan gradient banner in your terminal:
->
-> ```
-> ═══════════════════════════════════════════════════════════════════════════════
->         Welcome to Nexus-FCA - Advanced & Safe Facebook Chat API
-> ═══════════════════════════════════════════════════════════════════════════════
-> [ NEXUS-FCA ] > ...
-> ```
->
-> All status/info logs use a modern, professional gradient for easy visibility.
+## Key Features
+
+- **Modern & Safe:**
+  - Built with ES6+ features and TypeScript. No legacy code.
+- **Active Development:**
+  - Regular updates and improvements. Open to contributions.
+- **Easy to Use:**
+  - Simple API with clear documentation. Get started quickly.
+- **No External Dependencies:**
+  - No need for external libraries. Everything is included.
+- **No WebView/Browser Required:**
+  - Directly interacts with Facebook's Messenger API. No browser automation.
+- **No CAPTCHA/Verification:**
+  - Bypass CAPTCHA and verification challenges. Use at your own risk.
+- **No Rate Limits:**
+  - No restrictions on message sending. Use responsibly.
+- **No Account Verification:**
+  - No need to verify your account. Use with caution.
+- **All Major Messenger Features:**
+  - Messaging, reactions, group management, user info, and more.
+- **Safe & Testable:**
+  - No legacy/unsafe code. Test every feature live in Messenger.
+- **Admin & Safety Tools:**
+  - Rate limiting, allow/block lists, Safe Mode.
+- **Easy Login:**
+  - Use `appstate.json` for secure, passwordless login.
+- **Full Documentation:**
+  - Every feature documented in the `docs/` folder with real usage examples.
 
 ---
 
 _Disclaimer_: Use responsibly. Nexus-FCA is not affiliated with Facebook. Your account may be at risk if you use this for spam or automation against Facebook's terms.
 
 ---
-
-## Why Nexus-FCA?
-
-- All-in-one: Combines the most advanced features from multiple FCA forks.
-- Safety first: Cookie-based login, secure session management, and best practices for account protection.
-- Modern: Maintained, with new features and bug fixes.
-- Clean branding: No legacy credits, 100% Nexus-FCA.
 
 ## Install
 
@@ -63,7 +53,7 @@ npm install nexus-fca
 
 ## Example Usage
 
-```javascript
+```js
 const login = require("nexus-fca");
 
 login({ appState: [] }, (err, api) => {
