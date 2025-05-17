@@ -1,8 +1,7 @@
 <div align="center">
 
-<img src="https://i.ibb.co/LzkQMGWz/Future-Studio-Synthwave-Logo-Future-Studio-Synthwave-Logo.png" alt="Nexus-FCA Logo" width="220"/>
+<img src="https://i.ibb.co/LzkQMGWz/Future-Studio-Synthwave-Logo-Future-Studio-Synthwave-Logo.png" alt="Nexus-FCA Logo" width="500"/>
 
-![20241210_183831](https://ibb.co/qMy0zZfM)
 
 <h2 align="center"><b>Nexus-FCA: Advanced Facebook Chat API</b></h2>
 
