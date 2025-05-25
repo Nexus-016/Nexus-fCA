@@ -1,11 +1,11 @@
 {
   "name": "nexus-fca",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A modern, safe, and advanced Facebook Chat API for Node.js. Messenger automation, bots, and integrations made easy.",
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Nexus-016/Nexus-fCA.git"
+    "url": "git+https://github.com/Nexus-016/Nexus-fCA.git"
   },
   "author": "Al Amin",
   "license": "MIT",
