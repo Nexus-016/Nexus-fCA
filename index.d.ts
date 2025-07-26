@@ -1,10 +1,279 @@
-// Origin: NOCOM-BOT/mod_fbmsg_legacy
+// Nexus-FCA: Advanced TypeScript Definitions
+// Enhanced with modern types and better error handling
 
-declare module '@dongdev/fca-unofficial' {
-    import type { Readable, Duplex, Transform } from "stream";
-    import type EventEmitter from "events";
+declare module 'nexus-fca' {
+    import type { Readable, Duplex, Transform, EventEmitter } from "stream";
+    import type { EventEmitter as NodeEventEmitter } from "events";
 
     type ReadableStream = Readable | Duplex | Transform;
+    
+    // Enhanced Client Options
+    interface NexusClientOptions {
+        prefix?: string;
+        selfListen?: boolean;
+        listenEvents?: boolean;
+        updatePresence?: boolean;
+        autoMarkDelivery?: boolean;
+        autoMarkRead?: boolean;
+        safeMode?: boolean;
+        rateLimitEnabled?: boolean;
+        mqttReconnectInterval?: number;
+        logLevel?: 'silent' | 'error' | 'warn' | 'info' | 'verbose';
+        performanceOptimization?: boolean;
+        cachingEnabled?: boolean;
+        databasePath?: string;
+        retryAttempts?: number;
+        circuitBreakerThreshold?: number;
+        heartbeatInterval?: number;
+        middlewareEnabled?: boolean;
+    }
+
+    // Performance Manager Types
+    interface PerformanceMetrics {
+        requestCount: number;
+        averageResponseTime: number;
+        errorRate: number;
+        cacheHitRate: number;
+        memoryUsage: number;
+        activeMqttConnections: number;
+    }
+
+    interface CacheOptions {
+        ttl?: number;
+        maxSize?: number;
+        strategy?: 'lru' | 'lfu' | 'fifo';
+    }
+
+    // Error Handling Types
+    interface NexusError extends Error {
+        code?: string;
+        statusCode?: number;
+        details?: any;
+        retryable?: boolean;
+        timestamp?: number;
+    }
+
+    interface RetryOptions {
+        maxAttempts?: number;
+        backoffStrategy?: 'linear' | 'exponential';
+        baseDelay?: number;
+        maxDelay?: number;
+    }
+
+    interface CircuitBreakerOptions {
+        failureThreshold?: number;
+        resetTimeout?: number;
+        monitoringPeriod?: number;
+    }
+
+    // MQTT Connection Types
+    interface MqttConnectionOptions {
+        autoReconnect?: boolean;
+        reconnectInterval?: number;
+        heartbeatInterval?: number;
+        maxReconnectAttempts?: number;
+        connectionTimeout?: number;
+        keepaliveInterval?: number;
+    }
+
+    interface MqttConnectionState {
+        isConnected: boolean;
+        reconnectCount: number;
+        lastHeartbeat: number;
+        connectionStartTime: number;
+        totalDowntime: number;
+    }
+
+    // Enhanced Message Structure
+    interface NexusMessage {
+        id: string;
+        content: string;
+        body: string;
+        author: NexusUser;
+        thread: NexusThread;
+        attachments: NexusAttachment[];
+        mentions: { [id: string]: string };
+        timestamp: number;
+        isGroup: boolean;
+        type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'sticker' | 'gif';
+        reactions: NexusReaction[];
+        replyTo?: NexusMessage;
+        isEdited: boolean;
+        editHistory: string[];
+        
+        // Methods
+        reply(content: string | MessageOptions): Promise<NexusMessage>;
+        react(emoji: string): Promise<void>;
+        edit(newContent: string): Promise<void>;
+        unsend(): Promise<void>;
+        forward(threadId: string): Promise<void>;
+        pin(): Promise<void>;
+        unpin(): Promise<void>;
+        markAsRead(): Promise<void>;
+        getThread(): Promise<NexusThread>;
+        getAuthor(): Promise<NexusUser>;
+    }
+
+    // Enhanced User Structure
+    interface NexusUser {
+        id: string;
+        name: string;
+        firstName?: string;
+        lastName?: string;
+        username?: string;
+        profileUrl?: string;
+        avatarUrl?: string;
+        isFriend: boolean;
+        isBlocked: boolean;
+        isOnline: boolean;
+        lastActive?: number;
+        bio?: string;
+        location?: string;
+        metadata: Record<string, any>;
+        
+        // Methods
+        sendMessage(content: string | MessageOptions): Promise<NexusMessage>;
+        addAsFriend(): Promise<void>;
+        block(): Promise<void>;
+        unblock(): Promise<void>;
+        getSharedThreads(): Promise<NexusThread[]>;
+        getProfilePicture(): Promise<string>;
+        changeBio(bio: string): Promise<void>;
+    }
+
+    // Enhanced Thread Structure
+    interface NexusThread {
+        id: string;
+        name?: string;
+        threadType: 'user' | 'group';
+        imageUrl?: string;
+        emoji?: string;
+        color?: string;
+        participants: NexusUser[];
+        participantCount: number;
+        isGroup: boolean;
+        isArchived: boolean;
+        isPinned: boolean;
+        isMuted: boolean;
+        lastMessage?: NexusMessage;
+        lastMessageTime?: number;
+        permissions: ThreadPermissions;
+        metadata: Record<string, any>;
+        
+        // Methods
+        sendMessage(content: string | MessageOptions): Promise<NexusMessage>;
+        getHistory(limit?: number, before?: number): Promise<NexusMessage[]>;
+        addUser(userId: string): Promise<void>;
+        removeUser(userId: string): Promise<void>;
+        changeImage(imageUrl: string): Promise<void>;
+        changeName(name: string): Promise<void>;
+        changeColor(color: string): Promise<void>;
+        changeEmoji(emoji: string): Promise<void>;
+        setTitle(title: string): Promise<void>;
+        archive(): Promise<void>;
+        unarchive(): Promise<void>;
+        pin(): Promise<void>;
+        unpin(): Promise<void>;
+        mute(): Promise<void>;
+        unmute(): Promise<void>;
+        markAsRead(): Promise<void>;
+        markAsDelivered(): Promise<void>;
+        getParticipants(): Promise<NexusUser[]>;
+        getAdmins(): Promise<NexusUser[]>;
+        makeAdmin(userId: string): Promise<void>;
+        removeAdmin(userId: string): Promise<void>;
+    }
+
+    // Message Options
+    interface MessageOptions {
+        body?: string;
+        attachment?: ReadableStream | string;
+        attachments?: (ReadableStream | string)[];
+        url?: string;
+        sticker?: string;
+        emoji?: string;
+        mentions?: { [id: string]: string };
+        location?: { latitude: number; longitude: number };
+        replyTo?: string;
+        isTyping?: boolean;
+    }
+
+    // Attachment Types
+    interface NexusAttachment {
+        id: string;
+        type: 'image' | 'video' | 'audio' | 'file' | 'location' | 'contact';
+        url: string;
+        filename?: string;
+        size?: number;
+        width?: number;
+        height?: number;
+        duration?: number;
+        thumbnailUrl?: string;
+        metadata: Record<string, any>;
+    }
+
+    // Reaction Types
+    interface NexusReaction {
+        emoji: string;
+        users: string[];
+        count: number;
+    }
+
+    // Thread Permissions
+    interface ThreadPermissions {
+        canSendMessages: boolean;
+        canAddUsers: boolean;
+        canRemoveUsers: boolean;
+        canChangeInfo: boolean;
+        canMakeAdmin: boolean;
+    }
+
+    // Client Class
+    class NexusClient extends NodeEventEmitter {
+        constructor(options?: NexusClientOptions);
+        
+        // Authentication
+        login(credentials: { appState: any[] } | { email: string; password: string }): Promise<IFCAU_API>;
+        logout(): Promise<void>;
+        
+        // Command System
+        loadCommands(directory: string): void;
+        registerCommand(name: string, handler: CommandHandler): void;
+        unregisterCommand(name: string): void;
+        
+        // Middleware System
+        use(middleware: Middleware): void;
+        
+        // Performance Management
+        getMetrics(): PerformanceMetrics;
+        clearCache(): void;
+        optimizePerformance(): void;
+        
+        // Events
+        on(event: 'ready', listener: (api: IFCAU_API, userID: string) => void): this;
+        on(event: 'message', listener: (message: NexusMessage) => void): this;
+        on(event: 'command', listener: (command: { name: string; args: string[]; message: NexusMessage }) => void): this;
+        on(event: 'error', listener: (error: NexusError) => void): this;
+        on(event: 'reconnect', listener: () => void): this;
+        on(event: 'disconnect', listener: () => void): this;
+        on(event: 'userOnline', listener: (user: NexusUser) => void): this;
+        on(event: 'userOffline', listener: (user: NexusUser) => void): this;
+        on(event: 'threadUpdated', listener: (thread: NexusThread) => void): this;
+        on(event: 'messageReaction', listener: (reaction: NexusReaction, message: NexusMessage) => void): this;
+        on(event: 'messageEdit', listener: (oldMessage: NexusMessage, newMessage: NexusMessage) => void): this;
+        on(event: 'messageUnsend', listener: (message: NexusMessage) => void): this;
+        on(event: 'typingStart', listener: (user: NexusUser, thread: NexusThread) => void): this;
+        on(event: 'typingStop', listener: (user: NexusUser, thread: NexusThread) => void): this;
+    }
+
+    // Command Handler Type
+    // Command Handler Type
+    type CommandHandler = (args: string[], message: NexusMessage, api: IFCAU_API) => Promise<void> | void;
+
+    // Middleware Type
+    type Middleware = (message: NexusMessage, next: () => void) => void;
+
+    // Login function overloads
     function login(credentials: Partial<{
         email: string,
         password: string,
@@ -615,4 +884,136 @@ declare module '@dongdev/fca-unofficial' {
             userID: string,
             name: string
         };
+
+    // Enhanced Database Types
+    interface DatabaseOptions {
+        dbPath?: string;
+        cacheSize?: number;
+        journalMode?: 'DELETE' | 'TRUNCATE' | 'PERSIST' | 'MEMORY' | 'WAL' | 'OFF';
+        synchronous?: 'OFF' | 'NORMAL' | 'FULL' | 'EXTRA';
+    }
+
+    interface SessionData {
+        id: string;
+        userId?: string;
+        appState: any;
+        cookies?: any;
+        tokens?: any;
+        expiresAt?: number;
+        isActive?: boolean;
+        metadata?: Record<string, any>;
+    }
+
+    // Enhanced Performance Manager
+    class PerformanceManager {
+        constructor(options?: { cacheSize?: number; metricsRetention?: number });
+        
+        // Caching
+        setCache(key: string, value: any, ttl?: number): Promise<boolean>;
+        getCache(key: string): Promise<any>;
+        deleteCache(key: string): Promise<boolean>;
+        clearCache(): Promise<void>;
+        
+        // Rate Limiting
+        checkRateLimit(identifier: string, limit: number, window: number): Promise<boolean>;
+        
+        // Metrics
+        recordMetric(name: string, value: number, tags?: Record<string, string>): void;
+        getMetrics(): PerformanceMetrics;
+        
+        // Memory Management
+        optimizeMemory(): void;
+        getMemoryUsage(): { used: number; total: number; percentage: number };
+    }
+
+    // Enhanced Error Handler
+    class ErrorHandler {
+        constructor(options?: { 
+            retryOptions?: RetryOptions;
+            circuitBreakerOptions?: CircuitBreakerOptions;
+            fallbackStrategies?: Record<string, () => any>;
+        });
+        
+        handleError(error: Error, context?: string): Promise<any>;
+        retry<T>(fn: () => Promise<T>, options?: RetryOptions): Promise<T>;
+        getFallback(context: string): () => any;
+        setFallback(context: string, fallback: () => any): void;
+        getErrorStats(): { 
+            totalErrors: number; 
+            errorsByType: Record<string, number>; 
+            circuitBreakerState: string;
+        };
+    }
+
+    // Enhanced MQTT Manager
+    class AdvancedMqttManager extends NodeEventEmitter {
+        constructor(options?: MqttConnectionOptions);
+        
+        connect(): Promise<void>;
+        disconnect(): Promise<void>;
+        reconnect(): Promise<void>;
+        isConnected(): boolean;
+        getConnectionState(): MqttConnectionState;
+        
+        // Message handling
+        sendMessage(topic: string, message: any): Promise<void>;
+        subscribe(topic: string, handler: (message: any) => void): void;
+        unsubscribe(topic: string): void;
+        
+        // Health monitoring
+        startHeartbeat(): void;
+        stopHeartbeat(): void;
+        getHealthStatus(): { 
+            isHealthy: boolean; 
+            lastHeartbeat: number; 
+            connectionUptime: number;
+        };
+    }
+
+    // Enhanced Database
+    class EnhancedDatabase extends NodeEventEmitter {
+        constructor(options?: DatabaseOptions);
+        
+        initialize(): Promise<void>;
+        close(): Promise<void>;
+        
+        // User management
+        saveUser(user: Partial<NexusUser>): Promise<NexusUser>;
+        getUser(userId: string): Promise<NexusUser | null>;
+        
+        // Thread management
+        saveThread(thread: Partial<NexusThread>): Promise<NexusThread>;
+        getThread(threadId: string): Promise<NexusThread | null>;
+        
+        // Message management
+        saveMessage(message: Partial<NexusMessage>): Promise<NexusMessage>;
+        getMessages(threadId: string, limit?: number, before?: number): Promise<NexusMessage[]>;
+        
+        // Session management
+        saveSession(session: SessionData): Promise<SessionData>;
+        getActiveSession(userId?: string): Promise<SessionData | null>;
+        
+        // Cache management
+        setCache(key: string, value: any, ttl?: number): Promise<boolean>;
+        getCache(key: string): Promise<any>;
+        
+        // Event logging
+        logEvent(eventType: string, data?: Record<string, any>): Promise<void>;
+        
+        // Maintenance
+        cleanup(): Promise<void>;
+    }
+
+    // Compatibility Layer
+    class CompatibilityLayer {
+        constructor(api: IFCAU_API);
+        
+        createWrapper(packageName: 'fca-unofficial' | 'ws3-fca' | 'fca-utils'): any;
+        createLegacyApi(): any;
+        autoAdapt(api: any): any;
+        
+        // Middleware
+        addInterceptor(type: 'request' | 'response', interceptor: (data: any) => any): void;
+        removeInterceptor(type: 'request' | 'response', interceptor: (data: any) => any): void;
+    }
 }

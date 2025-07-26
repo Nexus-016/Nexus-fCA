@@ -2,239 +2,147 @@
 
 <img src="https://i.ibb.co/LzkQMGWz/Future-Studio-Synthwave-Logo-Future-Studio-Synthwave-Logo.png" alt="Nexus-FCA Logo" width="500"/>
 
+</div>
 
-<h2 align="center"><b>Nexus-FCA: Advanced Facebook Chat API</b></h2>
+# Nexus-FCA (2.0.0)
 
----
-
-Nexus-FCA is a modern, safe, and advanced Facebook Chat API for Node.js. It is designed for developers who want a reliable, easy-to-use, and actively maintained solution for Messenger automation, bots, and integrations.
-
----
-
-## Key Features
-
-- **Modern & Safe:**
-  - Built with ES6+ features and TypeScript. No legacy code.
-- **Active Development:**
-  - Regular updates and improvements. Open to contributions.
-- **Easy to Use:**
-  - Simple API with clear documentation. Get started quickly.
-- **No External Dependencies:**
-  - No need for external libraries. Everything is included.
-- **No WebView/Browser Required:**
-  - Directly interacts with Facebook's Messenger API. No browser automation.
-- **No CAPTCHA/Verification:**
-  - Bypass CAPTCHA and verification challenges. Use at your own risk.
-- **No Rate Limits:**
-  - No restrictions on message sending. Use responsibly.
-- **No Account Verification:**
-  - No need to verify your account. Use with caution.
-- **All Major Messenger Features:**
-  - Messaging, reactions, group management, user info, and more.
-- **Safe & Testable:**
-  - No legacy/unsafe code. Test every feature live in Messenger.
-- **Admin & Safety Tools:**
-  - Rate limiting, allow/block lists, Safe Mode.
-- **Easy Login:**
-  - Use `appstate.json` for secure, passwordless login.
-- **Full Documentation:**
-  - Every feature documented in the `docs/` folder with real usage examples.
+> **A next-generation, high-performance, developer-friendly Facebook Messenger bot framework.**
 
 ---
 
-_Disclaimer_: Use responsibly. Nexus-FCA is not affiliated with Facebook. Your account may be at risk if you use this for spam or automation against Facebook's terms.
+## 🚀 What's New in 2.0.0
+- **PerformanceManager**: Smart caching, metrics, and rate limiting for blazing speed.
+- **Advanced ErrorHandler**: Retry logic, circuit breaker, and fallback strategies for robust bots.
+- **AdvancedMqttManager**: Auto-reconnect, heartbeat, and stable MQTT event handling.
+- **API Compatibility Layer**: Drop-in support for fca-unofficial, ws3-fca, and fca-utils codebases.
+- **Rich Message, Thread, User Classes**: Discord.js-style objects for easy, powerful bot logic.
+- **EnhancedDatabase**: Persistent, high-speed storage for sessions, users, threads, and history.
+- **Full TypeScript Support**: Modern, type-safe APIs and definitions.
+- **Modern Command & Middleware System**: Event-driven, modular, and extensible.
+- **Advanced MQTT Features**: Topic management, load balancing, and real-time monitoring.
+- **Professional Logging**: Clean, colorized, and filterable logs for all environments.
 
 ---
 
-## Install
+## 🖼️ Demo
 
+<div align="center">
+  <img src="https://i.ibb.co/FbCSF0Pj/Capture.png" alt="Nexus-FCA Demo Screenshot" width="700"/>
+</div>
+
+---
+
+## ✨ Key Features
+- **Modern, Safe, and Actively Maintained**
+- **No WebView/Browser Automation**
+- **No CAPTCHA/Verification Required**
+- **All Major Messenger Features**
+- **Admin & Safety Tools**
+- **Easy Login with `appstate.json`**
+- **Full Documentation & Migration Guides**
+
+---
+
+## 📦 Installation
 ```bash
 npm install nexus-fca
 ```
 
-## Example Usage
+---
 
+## 🛠️ Quick Start Example
 ```js
 const login = require("nexus-fca");
 
-login({ appState: [] }, (err, api) => {
-    if (err) return console.error(err);
-
+login({ appState: require("./appstate.json") }, (err, api) => {
+    if (err) return console.error("Login error:", err);
     api.listenMqtt((err, event) => {
-        if (err) return console.error(err);
-        api.sendMessage(event.body, event.threadID);
-    });
-});
-```
-
-Result:
-
-<img width="517" alt="screen shot 2016-11-04 at 14 36 00" src="https://cloud.githubusercontent.com/assets/4534692/20023545/f8c24130-a29d-11e6-9ef7-47568bdbc1f2.png">
-
-## Main Functionality
-
-### Sending a message
-
-#### api.sendMessage(message, threadID[, callback][, messageID])
-
-Various types of message can be sent:
-
-* *Regular:* set field `body` to the desired message as a string.
-* *Sticker:* set a field `sticker` to the desired sticker ID.
-* *File or image:* Set field `attachment` to a readable stream or an array of readable streams.
-* *URL:* set a field `url` to the desired URL.
-* *Emoji:* set field `emoji` to the desired emoji as a string and set field `emojiSize` with size of the emoji (`small`, `medium`, `large`)
-
-Note that a message can only be a regular message (which can be empty) and optionally one of the following: a sticker, an attachment or a url.
-
-__Tip__: to find your own ID, you can look inside the cookies. The `userID` is under the name `c_user`.
-
-__Example (Basic Message)__
-
-```js
-const login = require("nexus-fca");
-
-login({ appState: [] }, (err, api) => {
-    if (err) {
-        console.error("Login Error:", err);
-        return;
-    }
-
-    let yourID = "000000000000000"; // Replace with actual Facebook ID
-    let msg = "Hey!";
-  
-    api.sendMessage(msg, yourID, (err) => {
-        if (err) console.error("Message Sending Error:", err);
-        else console.log("Message sent successfully!");
-    });
-});
-
-```
-
-__Example (File upload)__
-
-```js
-const login = require("nexus-fca");
-const fs = require("fs"); // ✅ Required the fs module
-
-login({ appState: [] }, (err, api) => {
-    if (err) {
-        console.error("Login Error:", err);
-        return;
-    }
-
-    let yourID = "000000000000000"; // Replace with actual Facebook ID
-    let imagePath = __dirname + "/image.jpg";
-
-    // Check if the file exists before sending
-    if (!fs.existsSync(imagePath)) {
-        console.error("Error: Image file not found!");
-        return;
-    }
-
-    let msg = {
-        body: "Hey!",
-        attachment: fs.createReadStream(imagePath)
-    };
-
-    api.sendMessage(msg, yourID, (err) => {
-        if (err) console.error("Message Sending Error:", err);
-        else console.log("Message sent successfully!");
-    });
-});
-
-```
-
----
-
-### Saving session.
-
-To avoid logging in every time you should save AppState (cookies etc.) to a file, then you can use it without having password in your scripts.
-
-__Example__
-
-```js
-const fs = require("fs");
-const login = require("nexus-fca");
-
-const credentials = { appState: [] };
-
-login(credentials, (err, api) => {
-    if (err) {
-        console.error("Login Error:", err);
-        return;
-    }
-
-    try {
-        const appState = JSON.stringify(api.getAppState(), null, 2); // Pretty print for readability
-        fs.writeFileSync("appstate.json", appState);
-        console.log("✅ AppState saved successfully!");
-    } catch (error) {
-        console.error("Error saving AppState:", error);
-    }
-});
-
-```
-
----
-
-### Listening to a chat
-
-#### api.listenMqtt(callback)
-
-Listen watches for messages sent in a chat. By default this won't receive events (joining/leaving a chat, title change etc…) but it can be activated with `api.setOptions({listenEvents: true})`. This will by default ignore messages sent by the current account, you can enable listening to your own messages with `api.setOptions({selfListen: true})`.
-
-__Example__
-
-```js
-const fs = require("fs");
-const login = require("nexus-fca");
-
-// Simple echo bot: Repeats everything you say. Stops when you say "/stop".
-login({ appState: JSON.parse(fs.readFileSync("appstate.json", "utf8")) }, (err, api) => {
-    if (err) {
-        console.error("Login Error:", err);
-        return;
-    }
-
-    api.setOptions({ listenEvents: true });
-
-    const stopListening = api.listenMqtt((err, event) => {
-        if (err) {
-            console.error("Listen Error:", err);
-            return;
-        }
-
-        // Mark message as read
-        api.markAsRead(event.threadID, (err) => {
-            if (err) console.error("Mark as read error:", err);
-        });
-
-        // Handle different event types
-        switch (event.type) {
-            case "message":
-                if (event.body && event.body.trim().toLowerCase() === "/stop") {
-                    api.sendMessage("Goodbye…", event.threadID);
-                    stopListening();
-                    return;
-                }
-                api.sendMessage(`TEST BOT: ${event.body}`, event.threadID);
-                break;
-
-            case "event":
-                console.log("Event Received:", event);
-                break;
+        if (err) return console.error("Listen error:", err);
+        if (event.body && event.threadID) {
+            api.sendMessage("Echo: " + event.body, event.threadID);
         }
     });
 });
-
 ```
 
 ---
 
-## Advanced Safety & Admin Features
+## 🧑‍💻 Modern Client Example (Recommended)
+```js
+const { NexusClient } = require('nexus-fca');
 
-- **Global Rate Limiting:** Prevents spam and abuse for all sensitive actions (e.g., avatar change, messaging).
-- **Safe Mode:** Set `NEXUS_FCA_SAFE_MODE=1` in your environment to disable risky features (like avatar/group changes) for extra protection.
-- **Allow/Block List:** Control who can use the API with `NEXUS_FCA_ALLOW_LIST` and `NEXUS_FCA_BLOCK_LIST` (comma-separated user IDs).
-- **Health Check:** Use `api.healthCheck((err, status) => { ... })` to verify the bot is running and see current safety status.
+const client = new NexusClient({
+    prefix: '!',
+    rateLimitEnabled: true,
+    performanceOptimization: true,
+    cachingEnabled: true,
+    logLevel: 'info'
+});
+
+client.on('ready', (api, userID) => {
+    console.log(`✅ Ready as ${userID}`);
+});
+
+client.on('message', async (message) => {
+    if (message.body === 'ping') await message.reply('🏓 Pong!');
+});
+
+client.login({ appState: require('./appstate.json') });
+```
+
+---
+
+## 🏗️ Architecture Overview
+- **lib/performance/PerformanceManager.js**: Caching, metrics, rate limiting
+- **lib/error/ErrorHandler.js**: Retry, circuit breaker, fallback
+- **lib/mqtt/AdvancedMqttManager.js**: Robust MQTT connection
+- **lib/compatibility/NexusClient.js**: Modern API, command system, middleware
+- **lib/message/Message.js, Thread.js, User.js**: Rich object models
+- **lib/database/EnhancedDatabase.js**: Persistent, high-speed storage
+- **lib/compatibility/CompatibilityLayer.js**: API migration and compatibility
+
+---
+
+## 🔄 Migration & Compatibility
+- **fca-unofficial**: Drop-in replacement, all methods supported
+- **ws3-fca**: Compatible method names and event system
+- **fca-utils**: Modern client API, command/middleware system
+- **Migration helpers**: See `docs/Migration-fca-unofficial.md` for step-by-step guides
+
+---
+
+## 📝 Advanced Features
+- **PerformanceManager**: `getMetrics()`, `setCache()`, `checkRateLimit()`
+- **ErrorHandler**: `retry()`, `setFallback()`, `getErrorStats()`
+- **AdvancedMqttManager**: `connect()`, `on('connected')`, `startHeartbeat()`
+- **EnhancedDatabase**: `saveUser()`, `getMessages()`, `saveSession()`, `logEvent()`
+- **CompatibilityLayer**: `createWrapper()`, `autoAdapt()`, `createLegacyApi()`
+- **Rich Message Objects**: `reply()`, `react()`, `edit()`, `forward()`, `pin()`, `markAsRead()`
+- **Thread/User Objects**: `addUser()`, `removeUser()`, `changeName()`, `getAdmins()`, `makeAdmin()`
+
+---
+
+## 📚 Documentation & Guides
+- **Full API Reference**: See [`DOCS.md`](./DOCS.md)
+- **Migration Guides**: See [`docs/`](./docs/) for fca-unofficial, ws3-fca, fca-utils
+- **TypeScript Usage**: Complete types in [`index.d.ts`](./index.d.ts)
+- **Performance & Error Handling**: See advanced sections in docs
+
+---
+
+## 🛡️ Troubleshooting
+- **MQTT Connection Refused**: Check your `appstate.json`, resolve Facebook checkpoints, or try a new account.
+- **TypeScript Errors**: Ensure you are using the latest `index.d.ts` and TypeScript version.
+- **Other Issues**: See logs, check for updates, or open an issue on GitHub.
+
+---
+
+## 💬 Community & Support
+- **GitHub**: [github.com/Nexus-016/Nexus-fCA](https://github.com/Nexus-016/Nexus-fCA)
+- **Docs**: See `/docs` for per-feature usage and migration
+- **Contributions**: PRs and issues welcome!
+
+---
+
+## ⚠️ Disclaimer
+Nexus-FCA is not affiliated with Facebook. Use responsibly and at your own risk. Automation may violate Facebook’s terms of service.

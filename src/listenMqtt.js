@@ -11,6 +11,11 @@ var identity = function () {};
 var form = {};
 var getSeqID = function () {};
 const logger = require("../lib/logger.js");
+
+// Enhanced imports
+const MqttManager = require("../lib/mqtt/MqttManager");
+const { errorHandler, wrapWithErrorHandling } = require("../lib/error/ErrorHandler");
+const { PerformanceOptimizer } = require("../lib/performance/PerformanceOptimizer");
 const topics = [
   "/ls_req",
   "/ls_resp",
@@ -229,7 +234,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   });
   mqttClient.on("connect", function () {
     if (process.env.OnStatus === undefined) {
-      logger("Nexus-FCA premium features loaded", "info");
+      logger("Nexus-FCA premium features works only with Nexus-Bot framework(Kidding)", "info");
       process.env.OnStatus = true;
     }
     topics.forEach((topicsub) => mqttClient.subscribe(topicsub));

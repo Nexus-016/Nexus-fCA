@@ -1,5 +1,5 @@
 "use strict";
-// Nexus-FCA: Advanced and Safe Facebook Chat API (custom build)
+// Nexus-FCA: Advanced and Safe Facebook Chat API (Enhanced Version)
 const utils = require("./utils");
 const log = require("npmlog");
 const { execSync } = require('child_process');
@@ -10,6 +10,23 @@ const path = require('path');
 const models = require("./lib/database/models");
 const logger = require("./lib/logger");
 const { safeMode, isUserAllowed, rateLimiter } = require('./utils');
+
+// Enhanced imports - All new modules
+const { NexusClient } = require('./lib/compatibility/NexusClient');
+const { CompatibilityLayer } = require('./lib/compatibility/CompatibilityLayer');
+const { performanceManager, PerformanceManager } = require('./lib/performance/PerformanceManager');
+const { errorHandler, ErrorHandler } = require('./lib/error/ErrorHandler');
+const { AdvancedMqttManager } = require('./lib/mqtt/AdvancedMqttManager');
+const { EnhancedDatabase } = require('./lib/database/EnhancedDatabase');
+const { Message } = require('./lib/message/Message');
+const { Thread } = require('./lib/message/Thread');
+const { User } = require('./lib/message/User');
+
+// Legacy imports for backward compatibility
+const MqttManager = require('./lib/mqtt/MqttManager');
+const { DatabaseManager, getInstance } = require('./lib/database/DatabaseManager');
+const { PerformanceOptimizer, getInstance: getPerformanceOptimizerInstance } = require('./lib/performance/PerformanceOptimizer');
+
 let checkVerified = null;
 const defaultLogRecordSize = 100;
 log.maxRecordSize = defaultLogRecordSize;
@@ -133,7 +150,6 @@ function buildAPI(globalOptions, html, jar) {
       const url = new URL(mqttEndpoint);
       region = url.searchParams.get("region")?.toUpperCase() || "PRN";
     }
-    logger(`Sever region ${region}`, 'info');
   } catch (e) {
     log.warning("login", "Not MQTT endpoint");
   }
@@ -141,6 +157,11 @@ function buildAPI(globalOptions, html, jar) {
   if (tokenMatch) {
     fb_dtsg = tokenMatch[1];
   }
+
+
+  // Initialize enhanced systems
+  const dbManager = getInstance();
+  const performanceOptimizer = getPerformanceOptimizerInstance();
   (async () => {
     try {
       await models.sequelize.authenticate();
@@ -152,7 +173,7 @@ function buildAPI(globalOptions, html, jar) {
   })();
   // Professional gradient banner for Nexus-FCA
   logger('═══════════════════════════════════════════════════════════════════════════════', 'info');
-  logger('        Welcome to Nexus-FCA - Advanced & Safe Facebook Chat API', 'info');
+  logger('             Nexus-FCA - Advanced & Safe Facebook Chat API', 'info');
   logger('═══════════════════════════════════════════════════════════════════════════════', 'info');
   logger(`Nexus-FCA`, 'info');
   const ctx = {
@@ -347,6 +368,12 @@ function login(loginData, options, callback) {
     };
     callback = prCallback;
   }
+  
+  // Initialize enhanced systems before login
+  enhancedDatabase.initialize().catch(err => {
+    logger('Failed to initialize enhanced database:', err);
+  });
+  
   loginHelper(
     loginData.appState,
     loginData.email,
@@ -358,4 +385,16 @@ function login(loginData, options, callback) {
   return returnPromise;
 }
 
+const enhancedDatabase = new EnhancedDatabase();
+
+// Enhanced exports
 module.exports = login;
+module.exports.NexusClient = NexusClient;
+module.exports.PerformanceManager = PerformanceManager;
+module.exports.ErrorHandler = ErrorHandler;
+module.exports.AdvancedMqttManager = AdvancedMqttManager;
+module.exports.EnhancedDatabase = EnhancedDatabase;
+module.exports.CompatibilityLayer = CompatibilityLayer;
+module.exports.Message = Message;
+module.exports.Thread = Thread;
+module.exports.User = User;

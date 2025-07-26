@@ -1,7 +1,7 @@
 {
   "name": "nexus-fca",
-  "version": "1.0.2",
-  "description": "A modern, safe, and advanced Facebook Chat API for Node.js. Messenger automation, bots, and integrations made easy.",
+  "version": "2.0.1",
+  "description": "A modern, safe, and advanced Facebook Chat API for Node.js with enhanced performance, smart caching, and TypeScript support. Messenger automation, bots, and integrations made easy.",
   "main": "index.js",
   "repository": {
     "type": "git",
@@ -22,10 +22,18 @@
     "request": "^2.53.0",
     "sequelize": "^6.37.6",
     "sqlite3": "^5.1.7",
+    "sqlite": "^5.1.1",
     "totp-generator": "^1.0.0",
-    "ws": "^8.18.1"
+    "ws": "^8.18.1",
+    "node-cache": "^5.1.2",
+    "lodash": "^4.17.21",
+    "semver": "^7.5.0",
+    "crypto": "^1.0.1"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.0",
     "eslint": "^7.5.0",
     "mocha": "^10.2.0",
     "prettier": "^1.11.1"
@@ -33,17 +41,28 @@
   "scripts": {
     "test": "mocha",
     "lint": "eslint **/*.js",
-    "prettier": "prettier utils.js src/* --write"
+    "prettier": "prettier utils.js src/* --write",
+    "build:types": "tsc --declaration --emitDeclarationOnly --outDir ./types",
+    "performance:test": "node examples/performance-test.js",
+    "db:vacuum": "node scripts/vacuum-database.js"
   },
   "keywords": [
     "facebook",
     "chat",
     "api",
     "fca",
-    "facebook-chat-api"
+    "facebook-chat-api",
+    "messenger",
+    "bot",
+    "automation",
+    "typescript",
+    "performance",
+    "caching",
+    "mqtt",
+    "advanced"
   ],
   "engines": {
-    "node": ">=10.x"
+    "node": ">=14.x"
   },
   "eslintConfig": {
     "env": {
@@ -85,6 +104,20 @@
     "url": "https://github.com/Nexus-016/Nexus-fCA/issues"
   },
   "directories": {
-    "test": "test"
-  }
+    "test": "test",
+    "lib": "lib",
+    "examples": "examples"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "utils.js",
+    "src/",
+    "lib/",
+    "docs/",
+    "ENHANCED_DOCS.md",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE-MIT"
+  ]
 }
