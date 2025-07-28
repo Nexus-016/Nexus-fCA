@@ -256,8 +256,121 @@ function buildAPI(globalOptions, html, jar) {
   };
 }
 
+// Legacy login helper function for appstate-only login
+function loginHelper(appState, email, password, globalOptions, callback, prCallback) {
+  let mainPromise = null;
+  const jar = utils.getJar();
+  
+  // Apply maximum safety validation
+  const safetyCheck = globalSafety.validateLogin(appState, email, password);
+  if (!safetyCheck.safe) {
+    return callback(new Error(`Login Safety Check Failed: ${safetyCheck.reason}`));
+  }
+  
+  // Apply safe user agent from safety module
+  globalOptions.userAgent = globalSafety.getSafeUserAgent();
+  
+  if (appState) {
+    try {
+      appState = JSON.parse(appState);
+    } catch (e) {
+      try {
+        appState = appState;
+      } catch (e) {
+        return callback(new Error("Failed to parse appState"));
+      }
+    }
+
+    try {
+      appState.forEach(c => {
+        const str = `${c.key}=${c.value}; expires=${c.expires}; domain=${c.domain}; path=${c.path};`;
+        jar.setCookie(str, "http://" + c.domain);
+      });
+
+      // Apply safety headers and no delays for maximum safety
+      mainPromise = utils.get('https://www.facebook.com/', jar, null, 
+        globalSafety.applySafeRequestOptions(globalOptions), { noRef: true })
+        .then(utils.saveCookies(jar));
+    } catch (e) {
+      return callback(new Error("Invalid appState format"));
+    }
+  } else {
+    return callback(new Error("AppState is required for legacy login"));
+  }
+
+  function handleRedirect(res) {
+    const reg = /<meta http-equiv="refresh" content="0;url=([^"]+)[^>]+>/;
+    const redirect = reg.exec(res.body);
+    if (redirect && redirect[1]) {
+      return utils.get(redirect[1], jar, null, globalOptions).then(utils.saveCookies(jar));
+    }
+    return res;
+  }
+
+  let ctx, api;
+  mainPromise = mainPromise
+    .then(handleRedirect)
+    .then(res => {
+      const mobileAgentRegex = /MPageLoadClientMetrics/gs;
+      if (!mobileAgentRegex.test(res.body)) {
+        globalOptions.userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
+        return utils.get('https://www.facebook.com/', jar, null, globalOptions, { noRef: true }).then(utils.saveCookies(jar));
+      }
+      return res;
+    })
+    .then(handleRedirect)
+    .then(res => {
+      const html = res.body;
+      const Obj = buildAPI(globalOptions, html, jar);
+      ctx = Obj.ctx;
+      api = Obj.api;
+      return res;
+    });
+
+  if (globalOptions.pageID) {
+    mainPromise = mainPromise
+      .then(() => utils.get(`https://www.facebook.com/${globalOptions.pageID}/messages/?section=messages&subsection=inbox`, jar, null, globalOptions))
+      .then(resData => {
+        let url = utils.getFrom(resData.body, 'window.location.replace("https:\\/\\/www.facebook.com\\', '");').split('\\').join('');
+        url = url.substring(0, url.length - 1);
+        return utils.get('https://www.facebook.com' + url, jar, null, globalOptions);
+      });
+  }
+
+  mainPromise
+    .then(async () => {
+      // Enhanced safety check after login
+      const safetyStatus = globalSafety.validateSession(ctx);
+      if (!safetyStatus.safe) {
+        logger(`⚠️ Login safety warning: ${safetyStatus.reason}`, 'warn');
+      }
+      
+      logger('Legacy login successful!', 'info');
+      
+      // Initialize safety monitoring
+      globalSafety.startMonitoring(ctx, api);
+      
+      callback(null, api);
+    })
+    .catch(e => {
+      // Enhanced error handling with safety checks
+      const safetyCheck = globalSafety.checkErrorSafety(e);
+      if (!safetyCheck.safe) {
+        logger(`🚨 SAFETY ALERT: ${safetyCheck.danger} - ${e.message}`, 'error');
+      }
+      
+      callback(e);
+    });
+}
+
 // --- REPLACE LEGACY LOGIN WITH NEXUS LOGIN SYSTEM ---
-const { nexusLogin } = require('./nexloginsystem');
+let nexusLogin;
+try {
+  ({ nexusLogin } = require('./nexloginsystem'));
+} catch (err) {
+  console.warn('Warning: Nexus Login System not found. Using legacy login fallback.');
+  // Legacy login fallback will be implemented below
+}
 
 /**
  * Modern login entry point using Nexus Login System
@@ -270,40 +383,79 @@ async function login(loginData, options = {}, callback) {
     callback = options;
     options = {};
   }
-  // Use Nexus Login System for all logins
-  try {
-    const result = await nexusLogin({
-      username: loginData.email || loginData.username,
-      password: loginData.password,
-      twofactor: loginData.twofactor || loginData.otp || undefined,
-      appstate: loginData.appState || loginData.appstate || undefined
-    }, options);
-    if (result.success && result.api) {
-      if (callback) return callback(null, result.api);
-      return result.api;
-    } else {
-      if (callback) return callback(new Error(result.message || 'Login failed'));
-      throw new Error(result.message || 'Login failed');
+  
+  // Use Nexus Login System if available, otherwise fallback to legacy
+  if (nexusLogin) {
+    try {
+      const result = await nexusLogin({
+        username: loginData.email || loginData.username,
+        password: loginData.password,
+        twofactor: loginData.twofactor || loginData.otp || undefined,
+        appstate: loginData.appState || loginData.appstate || undefined
+      }, options);
+      if (result.success && result.api) {
+        if (callback) return callback(null, result.api);
+        return result.api;
+      } else {
+        if (callback) return callback(new Error(result.message || 'Login failed'));
+        throw new Error(result.message || 'Login failed');
+      }
+    } catch (error) {
+      log.error('login', "Nexus Login System error: " + error.message);
+      if (callback) return callback(error);
+      throw error;
     }
-  } catch (error) {
-    log.error('login', "Lỗi không xác định, vui lòng thử lại sau: " + error.message);
-    if (callback) return callback(error);
+  } else {
+    // Legacy login fallback (direct appstate login only)
+    if (!loginData.appState && !loginData.appstate) {
+      const error = new Error('Nexus Login System not available. Please provide appState for legacy login or install the complete package.');
+      if (callback) return callback(error);
+      throw error;
+    }
+    
+    // Legacy appstate login
+    const globalOptions = {
+      selfListen: false,
+      selfListenEvent: false,
+      listenEvents: false,
+      listenTyping: false,
+      updatePresence: false,
+      forceLogin: false,
+      autoMarkDelivery: true,
+      autoMarkRead: false,
+      autoReconnect: true,
+      logRecordSize: defaultLogRecordSize,
+      online: true,
+      emitReady: false,
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      ...options
+    };
+    
+    return loginHelper(
+      loginData.appState || loginData.appstate,
+      null, // No email for appstate login
+      null, // No password for appstate login
+      globalOptions,
+      callback,
+      null
+    );
   }
 }
 
-module.exports = {
-  buildAPI,
-  login,
-  setOptions,
-  utils,
-  logger,
-  FacebookSafety,
-  CompatibilityLayer,
-  PerformanceManager,
-  ErrorHandler,
-  AdvancedMqttManager,
-  EnhancedDatabase,
-  Message,
-  Thread,
-  User
-};
+// Enhanced exports
+module.exports = login;
+module.exports.buildAPI = buildAPI;
+module.exports.login = login;
+module.exports.setOptions = setOptions;
+module.exports.utils = utils;
+module.exports.logger = logger;
+module.exports.FacebookSafety = FacebookSafety;
+module.exports.NexusClient = NexusClient;
+module.exports.PerformanceManager = PerformanceManager;
+module.exports.ErrorHandler = ErrorHandler;
+module.exports.AdvancedMqttManager = AdvancedMqttManager;
+module.exports.EnhancedDatabase = EnhancedDatabase;
+module.exports.CompatibilityLayer = CompatibilityLayer;
+module.exports.Message = Message;
+module.exports.Thread = Thread;
+module.exports.User = User;
