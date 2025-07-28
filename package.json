@@ -1,6 +1,6 @@
 {
   "name": "nexus-fca",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "A modern, safe, and advanced Facebook Chat API for Node.js with enhanced performance, smart caching, and TypeScript support. Messenger automation, bots, and integrations made easy.",
   "main": "index.js",
   "repository": {
