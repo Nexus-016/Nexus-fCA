@@ -1,6 +1,30 @@
-#
 # Changelog
-#
+
+## [2.0.5] - 2025-07-29 - FULLY INTEGRATED NPM EDITION
+### 🎯 MAJOR: Full NPM Integration
+- **✅ FULLY INTEGRATED**: Entire Nexus Login System now embedded directly in main `index.js`
+- **📦 NPM COMPATIBLE**: Works perfectly when installed via `npm install nexus-fca` - no external folder dependencies
+- **⚡ ZERO CONFIG**: Everything works out of the box - no separate folder setup required
+- **🔄 SEAMLESS MIGRATION**: Existing code continues to work, new code benefits from integration
+
+### Added
+- 🎯 **Direct exports**: `nexusLogin` and `IntegratedNexusLoginSystem` available directly from main package
+- 🧪 **Updated test files**: All test scripts now use integrated system (`require('nexus-fca')` instead of `./nexloginsystem`)
+- 📖 **New documentation**: `npm-integration-guide.md` with complete NPM usage guide
+- 🛠️ **NPM scripts**: Added `test:login`, `test:simple`, `test:2fa`, `test:all` for easy testing
+- 📦 **Enhanced package.json**: Updated keywords, description, and version for NPM integration
+
+### Changed
+- 🏗️ **Architecture**: Moved entire Nexus Login System from external folder into main index.js (lines 372-860+)
+- 📝 **Documentation**: Updated README.md to reflect NPM installation and integrated usage
+- 🔧 **Test files**: Fixed all test imports to use main package instead of external folder
+- 📦 **Package info**: Updated to v2.0.5 with new description highlighting NPM integration
+
+### Fixed
+- ❌ **NPM module errors**: Eliminated "Cannot find module './nexloginsystem'" when using as npm package
+- 🔗 **Import paths**: All test files and examples now use correct import paths for npm usage
+- 🎯 **Distribution**: Package now works identically whether used locally or installed via npm
+
 ## [2.0.4] - 2025-07-29
 ### Fixed
 - 🐛 **Missing nexloginsystem folder**: Added `nexloginsystem/` to npm package files array to fix "Cannot find module './nexloginsystem'" error

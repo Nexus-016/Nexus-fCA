@@ -1,7 +1,7 @@
 {
   "name": "nexus-fca",
-  "version": "2.0.4",
-  "description": "A modern, safe, and advanced Facebook Chat API for Node.js with enhanced performance, smart caching, and TypeScript support. Messenger automation, bots, and integrations made easy.",
+  "version": "2.0.5",
+  "description": "A modern, safe, and advanced Facebook Chat API for Node.js with fully integrated Nexus Login System. NPM-ready with ID/password/2FA support, ultra-low ban rate protection, and zero external dependencies.",
   "main": "index.js",
   "repository": {
     "type": "git",
@@ -51,9 +51,11 @@
     "build:types": "tsc --declaration --emitDeclarationOnly --outDir ./types",
     "performance:test": "node examples/performance-test.js",
     "db:vacuum": "node scripts/vacuum-database.js",
-    "appstate:generate": "node generate-appstate.js",
-    "appstate:clean": "rm -f appstate*.json credentials.json || del appstate*.json credentials.json 2>nul",
-    "setup": "npm install && echo Please create credentials.json with your Facebook login info"
+    "test:login": "node test-nexus-login.js",
+    "test:simple": "node test-login-simple.js",
+    "test:2fa": "node test-id-pass-2fa.js",
+    "test:all": "npm run test:simple && npm run test:2fa && npm run test:login",
+    "setup": "npm install && echo Please configure credentials in test files or use environment variables"
   },
   "keywords": [
     "facebook",
@@ -63,6 +65,11 @@
     "messenger",
     "bot",
     "automation",
+    "login",
+    "2fa",
+    "appstate",
+    "integrated",
+    "npm",
     "typescript",
     "performance",
     "caching",
