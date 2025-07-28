@@ -1,6 +1,6 @@
 {
   "name": "nexus-fca",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "A modern, safe, and advanced Facebook Chat API for Node.js with enhanced performance, smart caching, and TypeScript support. Messenger automation, bots, and integrations made easy.",
   "main": "index.js",
   "repository": {
@@ -15,43 +15,51 @@
     "chalk": "^4.1.2",
     "cheerio": "^1.0.0-rc.10",
     "duplexify": "^4.1.3",
+    "got": "^11.8.6",
     "gradient-string": "^2.0.2",
-    "https-proxy-agent": "^4.0.0",
-    "mqtt": "^4.3.8",
-    "npmlog": "^1.2.0",
-    "request": "^2.53.0",
-    "sequelize": "^6.37.6",
-    "sqlite3": "^5.1.7",
-    "sqlite": "^5.1.1",
-    "totp-generator": "^1.0.0",
-    "ws": "^8.18.1",
-    "node-cache": "^5.1.2",
+    "https-proxy-agent": "^7.0.5",
     "lodash": "^4.17.21",
+    "mqtt": "^4.3.8",
+    "node-cache": "^5.1.2",
+    "npmlog": "^7.0.1",
+    "request": "^2.88.2",
     "semver": "^7.5.0",
-    "crypto": "^1.0.1"
+    "sequelize": "^6.37.6",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "totp-generator": "^1.0.0",
+    "uuid": "^9.0.1",
+    "ws": "^8.18.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "typescript": "^5.0.0",
-    "ts-node": "^10.9.0",
     "eslint": "^7.5.0",
     "mocha": "^10.2.0",
-    "prettier": "^1.11.1"
+    "prettier": "^1.11.1",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
   },
   "scripts": {
+    "start": "node quick-start.js",
     "test": "mocha",
+    "test:safety": "node test-enhanced-safety.js",
+    "test:nexus-login": "node nexloginsystem/test.js",
+    "nexus-login": "node nexloginsystem/test.js",
+    "quick-start": "node quick-start.js",
     "lint": "eslint **/*.js",
     "prettier": "prettier utils.js src/* --write",
     "build:types": "tsc --declaration --emitDeclarationOnly --outDir ./types",
     "performance:test": "node examples/performance-test.js",
-    "db:vacuum": "node scripts/vacuum-database.js"
+    "db:vacuum": "node scripts/vacuum-database.js",
+    "appstate:generate": "node generate-appstate.js",
+    "appstate:clean": "rm -f appstate*.json credentials.json || del appstate*.json credentials.json 2>nul",
+    "setup": "npm install && echo Please create credentials.json with your Facebook login info"
   },
   "keywords": [
     "facebook",
     "chat",
     "api",
-    "fca",
-    "facebook-chat-api",
+    "nexus-fca",
     "messenger",
     "bot",
     "automation",
@@ -59,7 +67,9 @@
     "performance",
     "caching",
     "mqtt",
-    "advanced"
+    "advanced",
+    "safe",
+    "secure"
   ],
   "engines": {
     "node": ">=14.x"

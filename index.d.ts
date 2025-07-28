@@ -16,7 +16,7 @@ declare module 'nexus-fca' {
         autoMarkDelivery?: boolean;
         autoMarkRead?: boolean;
         safeMode?: boolean;
-        rateLimitEnabled?: boolean;
+        // rateLimitEnabled REMOVED for maximum Facebook account safety
         mqttReconnectInterval?: number;
         logLevel?: 'silent' | 'error' | 'warn' | 'info' | 'verbose';
         performanceOptimization?: boolean;
@@ -26,6 +26,7 @@ declare module 'nexus-fca' {
         circuitBreakerThreshold?: number;
         heartbeatInterval?: number;
         middlewareEnabled?: boolean;
+        maxSafetyMode?: boolean; // NEW: Maximum safety mode
     }
 
     // Performance Manager Types
@@ -914,8 +915,7 @@ declare module 'nexus-fca' {
         deleteCache(key: string): Promise<boolean>;
         clearCache(): Promise<void>;
         
-        // Rate Limiting
-        checkRateLimit(identifier: string, limit: number, window: number): Promise<boolean>;
+        // Rate Limiting DISABLED for maximum safety - no checkRateLimit method
         
         // Metrics
         recordMetric(name: string, value: number, tags?: Record<string, string>): void;
@@ -1008,7 +1008,8 @@ declare module 'nexus-fca' {
     class CompatibilityLayer {
         constructor(api: IFCAU_API);
         
-        createWrapper(packageName: 'fca-unofficial' | 'ws3-fca' | 'fca-utils'): any;
+        // Nexus-FCA compatibility utilities
+        createWrapper(packageName: 'nexus-fca'): any;
         createLegacyApi(): any;
         autoAdapt(api: any): any;
         

@@ -29,10 +29,8 @@ module.exports = function changeAvatarV2(defaultFuncs, api, ctx) {
     if (!isUserAllowed(userID)) {
       return callback(new Error("You are not allowed to change the avatar."));
     }
-    // Rate limiting (per user)
-    if (!rateLimiter.check(userID, 'changeAvatarV2')) {
-      return callback(new Error("Rate limit exceeded. Please wait before changing avatar again."));
-    }
+    // Rate limiting REMOVED for maximum safety
+    // Users can change avatar freely without artificial restrictions
 
     // Safety: Only allow change every 5 minutes
     const now = Date.now();

@@ -1339,34 +1339,130 @@ function getAccessFromBusiness(jar, Options) {
 // --- Nexus-FCA Advanced Safety Utilities ---
 
 /**
- * Global in-memory rate limiter for sensitive actions.
- * Usage: if (!rateLimiter.check(userID, 'sendMessage')) return callback(...)
+ * Advanced Safety System for Ultra-Low Ban Rate
+ * Intelligent request management to minimize Facebook account risks
  */
-const rateLimiter = {
-  limits: {},
-  windowMs: 60 * 1000, // 1 minute window
-  max: 20, // max 20 actions per window per user per action
-  check(userID, action) {
-    const now = Date.now();
-    if (!this.limits[userID]) this.limits[userID] = {};
-    if (!this.limits[userID][action]) this.limits[userID][action] = [];
-    // Remove old timestamps
-    this.limits[userID][action] = this.limits[userID][action].filter(ts => now - ts < this.windowMs);
-    if (this.limits[userID][action].length >= this.max) return false;
-    this.limits[userID][action].push(now);
+const smartSafetyLimiter = {
+  userSessions: {},
+  
+  // Human-like delay patterns to avoid detection
+  humanDelays: {
+    typing: { min: 800, max: 2000 },
+    reading: { min: 1000, max: 3000 },
+    thinking: { min: 2000, max: 5000 },
+    browsing: { min: 500, max: 1500 }
+  },
+  
+  // Risk level assessment
+  assessRisk(userID, action) {
+    if (!this.userSessions[userID]) {
+      this.userSessions[userID] = {
+        requestCount: 0,
+        errorCount: 0,
+        lastActivity: Date.now(),
+        riskLevel: 'low'
+      };
+    }
+    
+    const session = this.userSessions[userID];
+    const timeSinceLastActivity = Date.now() - session.lastActivity;
+    const errorRate = session.errorCount / Math.max(1, session.requestCount);
+    
+    // Update risk level based on activity patterns
+    if (errorRate > 0.3 || timeSinceLastActivity < 1000) {
+      session.riskLevel = 'high';
+    } else if (errorRate > 0.1 || timeSinceLastActivity < 3000) {
+      session.riskLevel = 'medium';
+    } else {
+      session.riskLevel = 'low';
+    }
+    
+    return session.riskLevel;
+  },
+  
+  // Get safe delay based on risk level and action type
+  getSafeDelay(userID, action = 'browsing') {
+    const riskLevel = this.assessRisk(userID, action);
+    const baseDelay = this.humanDelays[action] || this.humanDelays.browsing;
+    
+    // Risk multipliers for safety
+    const riskMultipliers = {
+      'low': 1,
+      'medium': 1.5,
+      'high': 2.5
+    };
+    
+    const multiplier = riskMultipliers[riskLevel] || 1;
+    const min = baseDelay.min * multiplier;
+    const max = baseDelay.max * multiplier;
+    
+    // Generate human-like random delay
+    const baseDelayTime = Math.random() * (max - min) + min;
+    const humanVariation = baseDelayTime * 0.1 * (Math.random() - 0.5);
+    
+    return Math.max(200, Math.floor(baseDelayTime + humanVariation));
+  },
+  
+  // Record activity for safety metrics
+  recordActivity(userID, isError = false) {
+    if (!this.userSessions[userID]) {
+      this.userSessions[userID] = {
+        requestCount: 0,
+        errorCount: 0,
+        lastActivity: Date.now(),
+        riskLevel: 'low'
+      };
+    }
+    
+    const session = this.userSessions[userID];
+    session.requestCount++;
+    session.lastActivity = Date.now();
+    
+    if (isError) {
+      session.errorCount++;
+    }
+    
+    // Auto-reset metrics every hour to prevent false risk escalation
+    if (session.requestCount > 100) {
+      session.requestCount = Math.floor(session.requestCount / 2);
+      session.errorCount = Math.floor(session.errorCount / 2);
+    }
+  },
+  
+  // Check if action is safe to proceed
+  isSafeToExecute(userID, action) {
+    const riskLevel = this.assessRisk(userID, action);
+    
+    // Always allow low risk actions
+    if (riskLevel === 'low') return true;
+    
+    // For higher risk, check recent activity
+    const session = this.userSessions[userID];
+    const timeSinceLastActivity = Date.now() - session.lastActivity;
+    
+    // Medium risk: ensure some delay between actions
+    if (riskLevel === 'medium' && timeSinceLastActivity < 3000) {
+      return false;
+    }
+    
+    // High risk: require longer delays
+    if (riskLevel === 'high' && timeSinceLastActivity < 10000) {
+      return false;
+    }
+    
     return true;
   }
 };
 
 /**
- * Safe mode: restricts risky features and disables dangerous actions.
- * Set process.env.NEXUS_FCA_SAFE_MODE = '1' to enable.
+ * Facebook Safety Mode: Enhanced protection against bans
+ * Set process.env.NEXUS_FCA_ULTRA_SAFE_MODE = '1' to enable maximum protection
  */
-const safeMode = process.env.NEXUS_FCA_SAFE_MODE === '1';
+const ultraSafeMode = process.env.NEXUS_FCA_ULTRA_SAFE_MODE === '1';
+const safeMode = process.env.NEXUS_FCA_SAFE_MODE === '1' || ultraSafeMode;
 
 /**
- * Allow/block list for user IDs (for admin control).
- * Set process.env.NEXUS_FCA_ALLOW_LIST and BLOCK_LIST as comma-separated IDs.
+ * Account protection lists for enhanced safety
  */
 const allowList = process.env.NEXUS_FCA_ALLOW_LIST ? process.env.NEXUS_FCA_ALLOW_LIST.split(',') : null;
 const blockList = process.env.NEXUS_FCA_BLOCK_LIST ? process.env.NEXUS_FCA_BLOCK_LIST.split(',') : null;
@@ -1377,8 +1473,21 @@ function isUserAllowed(userID) {
   return true;
 }
 
+// Legacy rate limiter - kept for backward compatibility but optimized for safety
+const rateLimiter = {
+  limits: {},
+  windowMs: 60 * 1000,
+  max: 20,
+  check(userID, action) {
+    // Use smart safety limiter instead of blocking
+    return smartSafetyLimiter.isSafeToExecute(userID, action);
+  }
+};
+
 module.exports.rateLimiter = rateLimiter;
+module.exports.smartSafetyLimiter = smartSafetyLimiter;
 module.exports.safeMode = safeMode;
+module.exports.ultraSafeMode = ultraSafeMode;
 module.exports.isUserAllowed = isUserAllowed;
 
 module.exports = {

@@ -9,7 +9,7 @@ const axios = require('axios');
 const path = require('path');
 const models = require("./lib/database/models");
 const logger = require("./lib/logger");
-const { safeMode, isUserAllowed, rateLimiter } = require('./utils');
+const { safeMode, ultraSafeMode, smartSafetyLimiter, isUserAllowed } = require('./utils'); // Enhanced safety system
 
 // Enhanced imports - All new modules
 const { NexusClient } = require('./lib/compatibility/NexusClient');
@@ -22,10 +22,25 @@ const { Message } = require('./lib/message/Message');
 const { Thread } = require('./lib/message/Thread');
 const { User } = require('./lib/message/User');
 
+// Advanced Safety Module - Minimizes ban/lock/checkpoint rates
+const FacebookSafety = require('./lib/safety/FacebookSafety');
+
 // Legacy imports for backward compatibility
 const MqttManager = require('./lib/mqtt/MqttManager');
 const { DatabaseManager, getInstance } = require('./lib/database/DatabaseManager');
 const { PerformanceOptimizer, getInstance: getPerformanceOptimizerInstance } = require('./lib/performance/PerformanceOptimizer');
+
+// Initialize global safety manager with ultra-low ban rate protection
+const globalSafety = new FacebookSafety({
+  enableSafeHeaders: true,
+  enableHumanBehavior: true,
+  enableAntiDetection: true,
+  enableAutoRefresh: true,
+  enableLoginValidation: true,
+  enableSafeDelays: true, // Human-like delays to reduce detection
+  bypassRegionLock: true,
+  ultraLowBanMode: ultraSafeMode // Ultra-low ban rate mode
+});
 
 let checkVerified = null;
 const defaultLogRecordSize = 100;
@@ -244,6 +259,16 @@ function buildAPI(globalOptions, html, jar) {
 function loginHelper(appState, email, password, globalOptions, callback, prCallback) {
   let mainPromise = null;
   const jar = utils.getJar();
+  
+  // Apply maximum safety validation
+  const safetyCheck = globalSafety.validateLogin(appState, email, password);
+  if (!safetyCheck.safe) {
+    return callback(new Error(`Login Safety Check Failed: ${safetyCheck.reason}`));
+  }
+  
+  // Apply safe user agent from safety module
+  globalOptions.userAgent = globalSafety.getSafeUserAgent();
+  
   if (appState) {
     try {
       appState = JSON.parse(appState);
@@ -261,17 +286,21 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
         jar.setCookie(str, "http://" + c.domain);
       });
 
-      mainPromise = utils.get('https://www.facebook.com/', jar, null, globalOptions, { noRef: true })
+      // Apply safety headers and no delays for maximum safety
+      mainPromise = utils.get('https://www.facebook.com/', jar, null, 
+        globalSafety.applySafeRequestOptions(globalOptions), { noRef: true })
         .then(utils.saveCookies(jar));
     } catch (e) {
       process.exit(0);
     }
   } else {
     mainPromise = utils
-      .get("https://www.facebook.com/", null, null, globalOptions, { noRef: true })
+      .get("https://www.facebook.com/", null, null, 
+        globalSafety.applySafeRequestOptions(globalOptions), { noRef: true })
       .then(utils.saveCookies(jar))
       .then(makeLogin(jar, email, password, globalOptions, callback, prCallback))
-      .then(() => utils.get('https://www.facebook.com/', jar, null, globalOptions).then(utils.saveCookies(jar)));
+      .then(() => utils.get('https://www.facebook.com/', jar, null, 
+        globalSafety.applySafeRequestOptions(globalOptions)).then(utils.saveCookies(jar)));
   }
 
   function handleRedirect(res) {
@@ -315,11 +344,29 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
 
   mainPromise
     .then(async () => {
-      // Version check and auto-update code removed for safety and to prevent error spam.
-      logger('Login successful!', '[ Nexus-FCA ] >');
+      // Enhanced safety check after login
+      const safetyStatus = globalSafety.validateSession(ctx);
+      if (!safetyStatus.safe) {
+        logger(`⚠️ Login safety warning: ${safetyStatus.reason}`, 'warn');
+      }
+      
+      // No version checking or auto-update for maximum safety and performance
+      logger('Login successful!', 'info');
+      logger('Nexus 2.0 (Enhanced)', 'info');
+      logger('Operating Normally', 'info');
+
+      // Initialize safety monitoring
+      globalSafety.startMonitoring(ctx, api);
+      
       callback(null, api);
     })
     .catch(e => {
+      // Enhanced error handling with safety checks
+      const safetyCheck = globalSafety.checkErrorSafety(e);
+      if (!safetyCheck.safe) {
+        logger(`🚨 SAFETY ALERT: ${safetyCheck.danger} - ${e.message}`, 'error');
+      }
+      
       callback(e);
     });
 }

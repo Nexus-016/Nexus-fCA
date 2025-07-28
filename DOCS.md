@@ -4,6 +4,38 @@
 
 ---
 
+# 🆕 Version 2.0.2 — Nexus Login System & Ultra-Safe Automation
+
+## 🚀 Major New Features
+- **Nexus Login System**: Advanced, safe, and automatic Facebook login system (`/nexloginsystem`).
+- **ID/Password/2FA Login**: Login directly with your Facebook username, password, and 2FA secret key (Google Authenticator supported).
+- **Automatic Appstate Generation**: Instantly generate and save fresh appstate cookies—no browser/cookie extraction needed.
+- **Seamless Bot Start**: After login, your bot starts automatically with the generated appstate.
+- **Ultra-Safe Device Simulation**: Human-like Android device/user-agent simulation for maximum account safety.
+- **Auto-Backup & Validation**: Appstate is auto-backed up and validated for every login.
+- **Advanced Error Handling**: Smart retry, 2FA fallback, and detailed error messages.
+- **Test File Included**: Test your login system easily with `/nexloginsystem/test-login.js`.
+- **Full Documentation**: See `/nexloginsystem/README.md` for usage, API, and safety tips.
+
+## ⚡ Quick Start (Nexus Login System)
+```js
+const { nexusLogin } = require('./nexloginsystem');
+const result = await nexusLogin({
+    username: 'your_email@gmail.com',
+    password: 'your_password',
+    twofactor: 'YOUR_2FA_SECRET_KEY'
+});
+if (result.success) {
+    // Bot is ready! API available immediately
+    result.api.sendMessage('Hello World!', result.api.getCurrentUserID());
+}
+```
+
+- See `/nexloginsystem/README.md` for full API, advanced usage, and safety best practices.
+- For 2FA setup, see the guide in the login system docs.
+
+---
+
 ## 📋 Table of Contents
 - [Enhanced Features](#enhanced-features)
 - [Architecture Overview](#architecture-overview)
@@ -16,10 +48,10 @@
 ---
 
 ## 🚀 Enhanced Features
-- **PerformanceManager**: Smart caching, metrics, and rate limiting
+- **PerformanceManager**: Smart caching, metrics, and intelligent optimization
 - **Advanced ErrorHandler**: Retry logic, circuit breaker, and fallback strategies
 - **AdvancedMqttManager**: Auto-reconnect, heartbeat, and robust MQTT event handling
-- **API Compatibility Layer**: Drop-in support for fca-unofficial, ws3-fca, and fca-utils
+- **Safety System**: Ultra-low ban rate with intelligent human behavior simulation
 - **Rich Message, Thread, User Classes**: Discord.js-style objects for easy, powerful bot logic
 - **EnhancedDatabase**: Persistent, high-speed storage for sessions, users, threads, and history
 - **Full TypeScript Support**: Modern, type-safe APIs and definitions
