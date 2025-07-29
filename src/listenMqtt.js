@@ -197,8 +197,12 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     connectTimeout: 5000,
   };
   if (ctx.globalOptions.proxy !== undefined) {
-    const agent = new HttpsProxyAgent(ctx.globalOptions.proxy);
-    options.wsOptions.agent = agent;
+    try {
+      const agent = new HttpsProxyAgent(ctx.globalOptions.proxy);
+      options.wsOptions.agent = agent;
+    } catch (error) {
+      log.error("listenMqtt", `Failed to create proxy agent: ${error.message}`);
+    }
   }
   ctx.mqttClient = new mqtt.Client(
     () =>

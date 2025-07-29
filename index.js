@@ -987,28 +987,55 @@ async function login(loginData, options = {}, callback) {
 
   // Enhanced login flow for ID/password authentication
   if (loginData.email || loginData.username || loginData.password) {
-    mainLogger.info('� Starting secure authentication');
-    mainLogger.info('�️ Using advanced security protocols');
+    mainLogger.info('🔐 Starting secure authentication');
+    mainLogger.info('🛡️ Generating secure session with new system');
     
     try {
+      // STEP 1: Use NEW system ONLY to generate appstate/cookies
       const result = await integratedNexusLogin({
         username: loginData.email || loginData.username,
         password: loginData.password,
         twofactor: loginData.twofactor || loginData.otp || undefined,
         _2fa: loginData._2fa || undefined,
         appstate: loginData.appState || loginData.appstate || undefined
-      }, options);
+      }, { autoStartBot: false }); // ONLY generate cookies, NO bot startup
       
-      if (result.success && result.api) {
-        // Bot startup completed successfully
-        mainLogger.info('✅ Login successful - Bot ready for use');
-        if (callback) return callback(null, result.api);
-        return result.api;
-      } else {
-        mainLogger.error('❌ Authentication failed', result.message || result.botError);
-        if (callback) return callback(new Error(result.message || result.botError || 'Login failed'));
-        throw new Error(result.message || result.botError || 'Login failed');
+      if (!result.success || !result.appstate) {
+        mainLogger.error('❌ Authentication failed', result.message);
+        if (callback) return callback(new Error(result.message || 'Login failed'));
+        throw new Error(result.message || 'Login failed');
       }
+      
+      mainLogger.info('✅ Session generated successfully');
+      mainLogger.info('🔄 Starting bot with generated session (old system)');
+      
+      // STEP 2: ALWAYS use OLD system for actual login/session/bot
+      const globalOptions = {
+        selfListen: false,
+        selfListenEvent: false,
+        listenEvents: false,
+        listenTyping: false,
+        updatePresence: false,
+        forceLogin: false,
+        autoMarkDelivery: true,
+        autoMarkRead: false,
+        autoReconnect: true,
+        logRecordSize: defaultLogRecordSize,
+        online: true,
+        emitReady: false,
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        ...options
+      };
+      
+      return loginHelper(
+        result.appstate,  // Use generated appstate
+        null,             // No email for old system
+        null,             // No password for old system
+        globalOptions,
+        callback,
+        null
+      );
+      
     } catch (error) {
       mainLogger.error('💥 Login error', error.message);
       if (callback) return callback(error);
