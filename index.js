@@ -25,7 +25,7 @@ const { User } = require('./lib/message/User');
 // Advanced Safety Module - Minimizes ban/lock/checkpoint rates
 const FacebookSafety = require('./lib/safety/FacebookSafety');
 
-// Legacy imports for backward compatibility
+// Core compatibility imports
 const MqttManager = require('./lib/mqtt/MqttManager');
 const { DatabaseManager, getInstance } = require('./lib/database/DatabaseManager');
 const { PerformanceOptimizer, getInstance: getPerformanceOptimizerInstance } = require('./lib/performance/PerformanceOptimizer');
@@ -256,7 +256,7 @@ function buildAPI(globalOptions, html, jar) {
   };
 }
 
-// Legacy login helper function for appstate-only login
+// Appstate login helper function
 function loginHelper(appState, email, password, globalOptions, callback, prCallback) {
   let mainPromise = null;
   const jar = utils.getJar();
@@ -295,7 +295,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       return callback(new Error("Invalid appState format"));
     }
   } else {
-    return callback(new Error("AppState is required for legacy login"));
+    return callback(new Error("AppState is required for session authentication"));
   }
 
   function handleRedirect(res) {
@@ -345,7 +345,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
         logger(`⚠️ Login safety warning: ${safetyStatus.reason}`, 'warn');
       }
       
-      logger('Legacy login successful!', 'info');
+      logger('✅ Session authenticated successfully', 'info');
       
       // Initialize safety monitoring
       globalSafety.startMonitoring(ctx, api);
@@ -388,7 +388,7 @@ class IntegratedNexusLoginSystem {
         this.lastLoginTime = 0;
         
         this.ensureDirectories();
-        this.logger('Nexus Login System initialized', '🚀');
+        this.logger('Login system ready', '🚀');
     }
 
     logger(message, emoji = '📝') {
@@ -606,7 +606,7 @@ class IntegratedNexusLoginSystem {
                 timeout: 30000
             };
 
-            this.logger('Attempting login with enhanced security...', '🔐');
+            this.logger('Connecting to Facebook servers...', '🔐');
 
             return new Promise((resolve) => {
                 axios.request(options).then(async (response) => {
@@ -646,7 +646,7 @@ class IntegratedNexusLoginSystem {
                             };
 
                             this.saveAppstate(appstate, result);
-                            this.logger('Login successful! Appstate generated and saved', '🎉');
+                            this.logger('✅ Login successful - Session established', '🎉');
                             
                             resolve(result);
                         }
@@ -672,11 +672,11 @@ class IntegratedNexusLoginSystem {
                             twoFactorCode = credentials._2fa;
                         } else if (credentials.twofactor && credentials.twofactor !== "0") {
                             try {
-                                this.logger('Processing 2FA with TOTP...', '🔐');
+                                this.logger('Generating 2FA code...', '🔐');
                                 const cleanSecret = decodeURI(credentials.twofactor).replace(/\s+/g, '').toUpperCase();
                                 const { otp } = TOTP.generate(cleanSecret);
                                 twoFactorCode = otp;
-                                this.logger(`Generated 2FA code: ${otp}`, '🔑');
+                                this.logger(`✅ 2FA code generated: ${otp}`, '🔑');
                             } catch (e) {
                                 return resolve({
                                     success: false,
@@ -705,7 +705,7 @@ class IntegratedNexusLoginSystem {
                         twoFactorForm.sig = this.encodesig(this.sort(twoFactorForm));
                         options.data = twoFactorForm;
 
-                        this.logger('Attempting 2FA login...', '🔐');
+                        this.logger('Verifying 2FA code...', '🔐');
 
                         try {
                             const twoFactorResponse = await axios.request(options);
@@ -742,7 +742,7 @@ class IntegratedNexusLoginSystem {
                             };
 
                             this.saveAppstate(appstate, result);
-                            this.logger('2FA login successful! Appstate saved', '🎉');
+                            this.logger('✅ 2FA verification successful', '🎉');
                             
                             resolve(result);
 
@@ -775,19 +775,19 @@ class IntegratedNexusLoginSystem {
 
     async login(credentials = null) {
         try {
-            this.logger('Starting Nexus Login System...', '🚀');
+            this.logger('Initializing authentication...', '🚀');
 
             // Check for existing valid appstate first
             if (this.options.autoLogin && this.hasValidAppstate()) {
-                this.logger('Valid appstate found, loading...', '✅');
+                this.logger('Existing session found', '✅');
                 const appstate = this.loadAppstate();
                 
                 if (appstate) {
                     return {
                         success: true,
                         appstate: appstate,
-                        method: 'existing_appstate',
-                        message: 'Login successful using existing appstate'
+                        method: 'existing_session',
+                        message: 'Login successful using existing session'
                     };
                 }
             }
@@ -807,7 +807,7 @@ class IntegratedNexusLoginSystem {
                 if (!credentials) {
                     return {
                         success: false,
-                        message: 'No valid appstate found and no credentials provided'
+                        message: 'No valid session found and no credentials provided'
                     };
                 }
             }
@@ -820,7 +820,7 @@ class IntegratedNexusLoginSystem {
                 };
             }
 
-            this.logger('Generating new appstate...', '🔄');
+            this.logger('Creating new session...', '🔄');
             
             // Generate new appstate
             const result = await this.generateAppstate(credentials);
@@ -841,10 +841,10 @@ class IntegratedNexusLoginSystem {
             return result;
 
         } catch (error) {
-            this.logger(`Login system error: ${error.message}`, '💥');
+            this.logger(`Authentication error: ${error.message}`, '💥');
             return {
                 success: false,
-                message: `System error: ${error.message}`
+                message: `Authentication error: ${error.message}`
             };
         }
     }
@@ -853,43 +853,107 @@ class IntegratedNexusLoginSystem {
 // Integrated Nexus Login wrapper for easy usage
 async function integratedNexusLogin(credentials = null, options = {}) {
     const loginSystem = new IntegratedNexusLoginSystem(options);
+    
+    // Professional logging system
+    const Logger = {
+        info: (stage, message, details = null) => {
+            console.log(`\x1b[36m[INFO]\x1b[0m \x1b[32m[${stage}]\x1b[0m ${message}`);
+            if (details && options.verbose) console.log(`\x1b[90m       → ${details}\x1b[0m`);
+        },
+        success: (stage, message, details = null) => {
+            console.log(`\x1b[32m[SUCCESS]\x1b[0m \x1b[32m[${stage}]\x1b[0m ${message}`);
+            if (details && options.verbose) console.log(`\x1b[90m         → ${details}\x1b[0m`);
+        },
+        warn: (stage, message, details = null) => {
+            console.log(`\x1b[33m[WARN]\x1b[0m \x1b[33m[${stage}]\x1b[0m ${message}`);
+            if (details) console.log(`\x1b[90m      → ${details}\x1b[0m`);
+        },
+        error: (stage, message, details = null) => {
+            console.log(`\x1b[31m[ERROR]\x1b[0m \x1b[31m[${stage}]\x1b[0m ${message}`);
+            if (details) console.log(`\x1b[90m       → ${details}\x1b[0m`);
+        }
+    };
+
+    // Phase 1: Secure authentication and session generation
+    Logger.info('AUTH', 'Initializing secure authentication');
+    Logger.info('SECURE-LOGIN', 'Establishing secure connection to Facebook');
+    
     const result = await loginSystem.login(credentials);
     
-    if (result.success && options.autoStartBot !== false) {
-        // Auto-start Nexus-FCA with the generated appstate
+    if (!result.success) {
+        Logger.error('AUTH', 'Authentication failed', result.message);
+        return result;
+    }
+    
+    Logger.success('AUTH', 'Authentication completed successfully');
+    Logger.info('SESSION', `Login method: ${result.method} | Status: Active`);
+    
+    if (options.autoStartBot !== false && result.appstate) {
+        // Phase 2: Start Nexus-FCA bot with authenticated session
+        Logger.info('BOT-INIT', 'Initializing bot with secure session');
+        
         try {
+            // Prepare global options for bot system
+            const globalOptions = {
+                selfListen: false,
+                selfListenEvent: false,
+                listenEvents: false,
+                listenTyping: false,
+                updatePresence: false,
+                forceLogin: false,
+                autoMarkDelivery: true,
+                autoMarkRead: false,
+                autoReconnect: true,
+                logRecordSize: defaultLogRecordSize,
+                online: true,
+                emitReady: false,
+                userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                ...options
+            };
+
             return new Promise((resolve) => {
-                login({ appState: result.appstate }, options, (err, api) => {
+                // Initialize Nexus-FCA bot with authenticated session
+                Logger.info('BOT-INIT', 'Loading bot API systems');
+                
+                loginHelper(result.appstate, null, null, globalOptions, (err, api) => {
                     if (err) {
+                        Logger.error('BOT-INIT', 'Failed to initialize bot API', err.message);
                         resolve({
                             success: true,
                             appstate: result.appstate,
                             method: result.method,
-                            warning: 'Appstate ready but bot startup failed',
+                            warning: 'Session ready but bot initialization failed',
                             botError: err.message
                         });
                     } else {
+                        Logger.success('BOT-INIT', 'Bot initialized successfully');
+                        Logger.success('READY', '🚀 Nexus-FCA is now ready for use');
+                        Logger.info('STATUS', `Bot online | User ID: ${api.getCurrentUserID()}`);
+                        
                         resolve({
                             success: true,
                             api: api,
                             appstate: result.appstate,
                             method: result.method,
-                            message: 'Nexus-FCA bot started successfully'
+                            message: 'Nexus-FCA login successful'
                         });
                     }
-                });
+                }, null);
             });
         } catch (error) {
+            Logger.error('BOT-INIT', 'Exception during bot initialization', error.message);
             return {
                 success: true,
                 appstate: result.appstate,
                 method: result.method,
-                warning: 'Appstate ready but bot startup failed',
+                warning: 'Session ready but bot initialization failed',
                 botError: error.message
             };
         }
     }
     
+    // Return session-only result (no bot startup)
+    Logger.success('SESSION-ONLY', 'Authentication completed successfully');
     return result;
 }
 
@@ -897,16 +961,35 @@ async function integratedNexusLogin(credentials = null, options = {}) {
  * Modern login entry point using Integrated Nexus Login System
  * Supports: username/password/2FA, auto appstate, ultra-safe mode
  * Usage: login({ email, password, twofactor }, options, callback)
+ * 
+ * FLOW:
+ * - ID/password: Generates secure session → Starts bot
+ * - Appstate only: Uses existing session directly
  */
 async function login(loginData, options = {}, callback) {
-  // Support legacy callback signature
+  // Support multiple callback signatures
   if (typeof options === 'function') {
     callback = options;
     options = {};
   }
   
-  // Use Integrated Nexus Login System for ID/pass login, or legacy for appstate-only
+  // Professional logging
+  const mainLogger = {
+    info: (message, details = null) => {
+      console.log(`\x1b[36m[NEXUS-FCA]\x1b[0m ${message}`);
+      if (details && options.verbose) console.log(`\x1b[90m            → ${details}\x1b[0m`);
+    },
+    error: (message, details = null) => {
+      console.log(`\x1b[31m[NEXUS-FCA]\x1b[0m \x1b[31m${message}\x1b[0m`);
+      if (details) console.log(`\x1b[90m            → ${details}\x1b[0m`);
+    }
+  };
+
+  // Enhanced login flow for ID/password authentication
   if (loginData.email || loginData.username || loginData.password) {
+    mainLogger.info('� Starting secure authentication');
+    mainLogger.info('�️ Using advanced security protocols');
+    
     try {
       const result = await integratedNexusLogin({
         username: loginData.email || loginData.username,
@@ -917,26 +1000,32 @@ async function login(loginData, options = {}, callback) {
       }, options);
       
       if (result.success && result.api) {
+        // Bot startup completed successfully
+        mainLogger.info('✅ Login successful - Bot ready for use');
         if (callback) return callback(null, result.api);
         return result.api;
       } else {
-        if (callback) return callback(new Error(result.message || 'Login failed'));
-        throw new Error(result.message || 'Login failed');
+        mainLogger.error('❌ Authentication failed', result.message || result.botError);
+        if (callback) return callback(new Error(result.message || result.botError || 'Login failed'));
+        throw new Error(result.message || result.botError || 'Login failed');
       }
     } catch (error) {
-      log.error('login', "Nexus Login System error: " + error.message);
+      mainLogger.error('💥 Login error', error.message);
       if (callback) return callback(error);
       throw error;
     }
   } else {
-    // Legacy appstate-only login
+    // Appstate-only authentication (direct session authentication)
     if (!loginData.appState && !loginData.appstate) {
-      const error = new Error('Username and password are required for login, or provide appState for legacy login.');
+      const error = new Error('Username and password are required for login, or provide appState for session authentication.');
+      mainLogger.error('❌ No credentials provided', 'Either provide ID/password or appstate');
       if (callback) return callback(error);
       throw error;
     }
     
-    // Legacy appstate login
+    // Direct session authentication using appstate
+    mainLogger.info('� Starting session authentication');
+    
     const globalOptions = {
       selfListen: false,
       selfListenEvent: false,
