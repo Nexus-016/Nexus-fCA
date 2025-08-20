@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.1.0] - 2025-08-20 - SESSION RELIABILITY & PROMISE LOGIN
+### 🚀 Highlights
+Stability-focused release improving long‑running bot sessions, reducing false `not_logged_in` events, and modernizing the login flow.
+
+### Added
+- ✅ Promise support for `login()` (dual callback + Promise API)
+- 🆔 Persistent device fingerprint (saved to `persistent-device.json`) to reduce checkpoint / lock frequency
+- 🛡️ New `validateSession()` multi-endpoint heuristic (lightweight, resilient preflight)
+- ⚙️ New global option: `disablePreflight` (skip session validation if desired)
+- 🔄 Structured error types from `parseAndCheckLogin` (`login_redirect`, `html_login_page`, `network_redirect`, etc.)
+- 🧪 Example: `examples/echo-test.js` (Promise style, supports env credentials or appstate)
+
+### Changed
+- 🔁 `listenMqtt` now performs silent initial validation; only emits `not_logged_in` after a confirmatory retry
+- 🧠 `parseAndCheckLogin` now robustly handles 3xx chains & HTML login fallback pages
+- 🔐 Default behavior: device identity no longer rotates unless explicitly overridden
+- 🧩 Refactored internal cookie & session utilities (centralized in `utils.js`)
+- 📄 Rewritten documentation (README, DOCS, CHANGELOG) for concise modern onboarding
+
+### Fixed
+- ❌ Spurious `parseAndCheckLogin got status code: 302` fatal errors now classified & recovered when possible
+- 💤 False negatives from legacy preflight removed (no premature `not_logged_in` during transient redirects)
+- 🔄 Edge reconnect loop where MQTT closed before revalidation completed
+
+### Migration Notes (2.0.x → 2.1.0)
+- Existing code using callbacks continues to work. To use Promises: `const api = await login(opts);`
+- If you previously depended on device rotation, disable persistent device via option (see README) or delete `persistent-device.json`.
+- Remove any custom preflight hacks; built‑in `validateSession` supersedes them.
+
+### Developer / Internal
+- Centralized session validation pipeline
+- Added granular error classification to aid future retry/backoff strategies
+- Prepared foundation for upcoming metrics hooks in 2.2.x
+
+---
+
 ## [2.0.5] - 2025-07-29 - FULLY INTEGRATED NPM EDITION
 ### 🎯 MAJOR: Full NPM Integration
 - **✅ FULLY INTEGRATED**: Entire Nexus Login System now embedded directly in main `index.js`

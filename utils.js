@@ -989,6 +989,7 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
     return function (data) {
         return tryPromise(function () {
             log.verbose("parseAndCheckLogin", data.body);
+            // --- Handle HTTP 5xx with bounded retry (existing logic) ---
             if (data.statusCode >= 500 && data.statusCode < 600) {
                 if (retryCount >= 5) {
                     throw {
@@ -1016,6 +1017,34 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
                     )
                     .then(parseAndCheckLogin(ctx, defaultFuncs, retryCount, sourceCall));
             }
+            // --- New: Explicit 3xx redirect handling (302 login checkpoint, etc.) ---
+            if (data.statusCode >= 300 && data.statusCode < 400) {
+                const location = data.headers && (data.headers.location || data.headers.Location);
+                if (!location) {
+                    throw {
+                        message: `Redirect (${data.statusCode}) without location header.`,
+                        statusCode: data.statusCode,
+                        res: data.body,
+                        error: "Redirect without location.",
+                        sourceCall
+                    };
+                }
+                // Detect checkpoint/login redirects explicitly
+                if (/checkpoint|login|recover/i.test(location)) {
+                    throw {
+                        message: `Redirected to login/checkpoint: ${location}`,
+                        statusCode: data.statusCode,
+                        location,
+                        error: "Not logged in.",
+                        type: "login_redirect",
+                        res: data.body,
+                        sourceCall
+                    };
+                }
+                log.warn("parseAndCheckLogin", `Following redirect -> ${location}`);
+                return defaultFuncs.get(location, ctx.jar)
+                    .then(parseAndCheckLogin(ctx, defaultFuncs, retryCount, sourceCall));
+            }
             if (data.statusCode !== 200) {
                 throw {
                     message: `parseAndCheckLogin got status code: ${data.statusCode}.`,
@@ -1026,23 +1055,60 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
                 };
             }
             let res;
+            let bodyText = data.body || "";
+            // --- New: Detect full HTML (often login page) before JSON parse ---
+            const looksLikeHTML = /<html[\s\S]*<\/html>/i.test(bodyText);
+            if (looksLikeHTML && /login|checkpoint|password|m_faceweb|m\.facebook\.com\/login/i.test(bodyText)) {
+                throw {
+                    message: "Received HTML login/checkpoint page instead of JSON (session likely invalid).",
+                    statusCode: data.statusCode,
+                    res: bodyText.slice(0, 5000),
+                    error: "Not logged in.",
+                    type: "html_login_page",
+                    sourceCall
+                };
+            }
             try {
-                res = JSON.parse(makeParsable(data.body));
+                res = JSON.parse(makeParsable(bodyText));
             } catch (e) {
-                log.error("JSON parsing failed:", data.body);
+                // Additional heuristic: if body has FB login form markers
+                if (/login_form|checkpointSubmitButton|memorialized/i.test(bodyText)) {
+                    throw {
+                        message: "Facebook returned login/checkpoint HTML instead of JSON.",
+                        detail: e.message,
+                        res: bodyText.slice(0, 5000),
+                        error: "Not logged in.",
+                        type: "html_login_page_parse_fail",
+                        sourceCall
+                    };
+                }
+                log.error("JSON parsing failed:", bodyText);
                 throw {
                     message: "Failed to parse JSON response.",
                     detail: e.message,
-                    res: data.body,
+                    res: bodyText.slice(0, 5000),
                     error: "JSON.parse error.",
                     sourceCall
                 };
             }
             if (res.redirect && data.request.method === "GET") {
+                // New: classify redirect target
+                if (/checkpoint|login/i.test(res.redirect)) {
+                    throw {
+                        message: `Redirected to login/checkpoint (JSON redirect): ${res.redirect}`,
+                        statusCode: data.statusCode,
+                        location: res.redirect,
+                        error: "Not logged in.",
+                        type: "login_redirect",
+                        res,
+                        sourceCall
+                    };
+                }
                 return defaultFuncs
                     .get(res.redirect, ctx.jar)
                     .then(parseAndCheckLogin(ctx, defaultFuncs, undefined, sourceCall));
             }
+            // --- Existing cookie & token handling logic (unchanged) ---
             if (
                 res.jsmods?.require &&
                 Array.isArray(res.jsmods.require[0]) &&
@@ -1062,7 +1128,9 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
                     }
                 }
             }
-            if (res.error === 1357001) {
+            // --- New: Detect common not-logged-in payload patterns ---
+            if (res.error === 1357001 || res.error === 1357004 || res.errorSummary === "login required") {
+                // 1357001 existing logic below triggers auto_login; keep classification
                 if (!ctx.auto_login) {
                     ctx.auto_login = true;
                     auto_login(success => {
@@ -1537,5 +1605,6 @@ module.exports = {
     setProxy,
     checkLiveCookie,
     getAccessFromBusiness,
-    getFroms
+    getFroms,
+    validateSession,
 };

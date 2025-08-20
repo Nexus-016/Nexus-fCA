@@ -380,37 +380,52 @@ class IntegratedNexusLoginSystem {
             safeMode: options.safeMode !== false,
             maxRetries: options.maxRetries || 3,
             retryDelay: options.retryDelay || 5000,
+            // New: persistentDevice disables random device rotation
+            persistentDevice: options.persistentDevice !== false,
+            persistentDeviceFile: options.persistentDeviceFile || path.join(process.cwd(), 'persistent-device.json'),
             ...options
         };
 
         this.deviceCache = new Map();
         this.loginAttempts = 0;
         this.lastLoginTime = 0;
+        // New: load previously persisted device if any
+        this.fixedDeviceProfile = this.loadPersistentDevice();
         
         this.ensureDirectories();
         this.logger('Login system ready', '🚀');
     }
 
-    logger(message, emoji = '📝') {
-        const timestamp = new Date().toLocaleString();
-        console.log(`${emoji} [${timestamp}] ${message}`);
+    loadPersistentDevice() {
+        try {
+            if (!this.options.persistentDevice) return null;
+            if (fs.existsSync(this.options.persistentDeviceFile)) {
+                const raw = JSON.parse(fs.readFileSync(this.options.persistentDeviceFile, 'utf8'));
+                if (raw && raw.device && raw.deviceId && raw.familyDeviceId && raw.userAgent) {
+                    this.logger('Loaded persistent device profile', '📱');
+                    return raw;
+                }
+            }
+        } catch (e) {
+            this.logger('Failed to load persistent device: ' + e.message, '⚠️');
+        }
+        return null;
     }
 
-    ensureDirectories() {
-        const dirs = [
-            path.dirname(this.options.appstatePath),
-            path.dirname(this.options.credentialsPath),
-            this.options.backupPath
-        ];
-        
-        dirs.forEach(dir => {
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-        });
+    savePersistentDevice(profile) {
+        if (!this.options.persistentDevice) return;
+        try {
+            fs.writeFileSync(this.options.persistentDeviceFile, JSON.stringify(profile, null, 2));
+            this.logger('Saved persistent device profile', '💾');
+        } catch (e) {
+            this.logger('Failed to save persistent device: ' + e.message, '⚠️');
+        }
     }
 
     getRandomDevice() {
+        if (this.fixedDeviceProfile) {
+            return this.fixedDeviceProfile; // reuse device
+        }
         const devices = [
             { model: "Pixel 6", build: "SP2A.220505.002", sdk: "30", release: "11" },
             { model: "Pixel 5", build: "RQ3A.210805.001.A1", sdk: "30", release: "11" },
@@ -420,17 +435,21 @@ class IntegratedNexusLoginSystem {
             { model: "Pixel 7", build: "TD1A.220804.031", sdk: "33", release: "13" },
             { model: "Samsung Galaxy S22", build: "S901USQU2AVB3", sdk: "32", release: "12" }
         ];
-        
         const device = devices[Math.floor(Math.random() * devices.length)];
         const deviceId = this.generateConsistentDeviceId(device);
-        
-        return {
+        const profile = {
             userAgent: `Dalvik/2.1.0 (Linux; U; Android ${device.release}; ${device.model} Build/${device.build})`,
             device,
             deviceId,
             familyDeviceId: uuidv4(),
             androidId: this.generateAndroidId()
         };
+        // Persist first generated device if persistence enabled
+        if (this.options.persistentDevice && !this.fixedDeviceProfile) {
+            this.fixedDeviceProfile = profile;
+            this.savePersistentDevice(profile);
+        }
+        return profile;
     }
 
     generateConsistentDeviceId(device) {
@@ -640,9 +659,11 @@ class IntegratedNexusLoginSystem {
                                 device_info: {
                                     model: androidDevice.device.model,
                                     user_agent: androidDevice.userAgent,
-                                    device_id: androidDevice.deviceId
+                                    device_id: androidDevice.deviceId,
+                                    family_device_id: androidDevice.familyDeviceId
                                 },
-                                generated_at: new Date().toISOString()
+                                generated_at: new Date().toISOString(),
+                                persistent_device: !!this.options.persistentDevice
                             };
 
                             this.saveAppstate(appstate, result);
@@ -972,6 +993,17 @@ async function login(loginData, options = {}, callback) {
     callback = options;
     options = {};
   }
+  // Add promise wrapper when no callback supplied
+  let usePromise = false;
+  if (typeof callback !== 'function') {
+    usePromise = true;
+  }
+  const promise = usePromise ? new Promise((resolve, reject) => {
+    callback = function (err, api) {
+      if (err) return reject(err);
+      resolve(api);
+    };
+  }) : null;
   
   // Professional logging
   const mainLogger = {
@@ -1002,8 +1034,8 @@ async function login(loginData, options = {}, callback) {
       
       if (!result.success || !result.appstate) {
         mainLogger.error('❌ Authentication failed', result.message);
-        if (callback) return callback(new Error(result.message || 'Login failed'));
-        throw new Error(result.message || 'Login failed');
+        if (callback) callback(new Error(result.message || 'Login failed'));
+        return usePromise ? promise : undefined;
       }
       
       mainLogger.info('✅ Session generated successfully');
@@ -1027,7 +1059,7 @@ async function login(loginData, options = {}, callback) {
         ...options
       };
       
-      return loginHelper(
+      loginHelper(
         result.appstate,  // Use generated appstate
         null,             // No email for old system
         null,             // No password for old system
@@ -1035,23 +1067,24 @@ async function login(loginData, options = {}, callback) {
         callback,
         null
       );
+      return usePromise ? promise : undefined;
       
     } catch (error) {
       mainLogger.error('💥 Login error', error.message);
-      if (callback) return callback(error);
-      throw error;
+      if (callback) callback(error);
+      return usePromise ? promise : undefined;
     }
   } else {
     // Appstate-only authentication (direct session authentication)
     if (!loginData.appState && !loginData.appstate) {
       const error = new Error('Username and password are required for login, or provide appState for session authentication.');
       mainLogger.error('❌ No credentials provided', 'Either provide ID/password or appstate');
-      if (callback) return callback(error);
-      throw error;
+      if (callback) callback(error);
+      return usePromise ? promise : undefined;
     }
     
     // Direct session authentication using appstate
-    mainLogger.info('� Starting session authentication');
+    mainLogger.info('🔄 Starting session authentication');
     
     const globalOptions = {
       selfListen: false,
@@ -1070,7 +1103,7 @@ async function login(loginData, options = {}, callback) {
       ...options
     };
     
-    return loginHelper(
+    loginHelper(
       loginData.appState || loginData.appstate,
       null, // No email for appstate login
       null, // No password for appstate login
@@ -1078,6 +1111,7 @@ async function login(loginData, options = {}, callback) {
       callback,
       null
     );
+    return usePromise ? promise : undefined;
   }
 }
 

@@ -1,180 +1,133 @@
 # Nexus-FCA Documentation (2025 Edition)
 
-> **Nexus-FCA is a next-generation, high-performance, developer-friendly Facebook Messenger bot framework.**
+> Advanced, safe, high-performance Facebook Messenger automation with integrated secure login, ultra‑low ban rate protections, and modern modular architecture.
 
 ---
+## 🆕 Version 2.1.0 – Session Stability & Safety Upgrade
+**Key Enhancements**
+- Persistent device fingerprint (prevents repeated “new device” flags)
+- Smarter multi-endpoint session validation (`validateSession`) reducing false logouts
+- Expanded redirect & HTML login detection in `parseAndCheckLogin`
+- Promise support for `login()` (hybrid callback or async/await)
+- Reduced noisy `not_logged_in` events (graceful preflight with retry)
+- Option: `{ disablePreflight: true }` to bypass validation if needed
 
-# 🆕 Version 2.0.2 — Nexus Login System & Ultra-Safe Automation
+**Upgrade Guidance**: No breaking changes. Remove any custom wrappers previously used to promisify `login()`. If you filtered logs for substring “parseAndCheckLogin got status code”, consider switching to structured error `error.type`.
 
-## 🚀 Major New Features
-- **Nexus Login System**: Advanced, safe, and automatic Facebook login system (`/nexloginsystem`).
-- **ID/Password/2FA Login**: Login directly with your Facebook username, password, and 2FA secret key (Google Authenticator supported).
-- **Automatic Appstate Generation**: Instantly generate and save fresh appstate cookies—no browser/cookie extraction needed.
-- **Seamless Bot Start**: After login, your bot starts automatically with the generated appstate.
-- **Ultra-Safe Device Simulation**: Human-like Android device/user-agent simulation for maximum account safety.
-- **Auto-Backup & Validation**: Appstate is auto-backed up and validated for every login.
-- **Advanced Error Handling**: Smart retry, 2FA fallback, and detailed error messages.
-- **Test File Included**: Test your login system easily with `/nexloginsystem/test-login.js`.
-- **Full Documentation**: See `/nexloginsystem/README.md` for usage, API, and safety tips.
-
-## ⚡ Quick Start (Nexus Login System)
+---
+## ⚡ Quick Start
 ```js
-const { nexusLogin } = require('./nexloginsystem');
-const result = await nexusLogin({
-    username: 'your_email@gmail.com',
-    password: 'your_password',
-    twofactor: 'YOUR_2FA_SECRET_KEY'
-});
-if (result.success) {
-    // Bot is ready! API available immediately
-    result.api.sendMessage('Hello World!', result.api.getCurrentUserID());
-}
+const login = require('nexus-fca');
+(async () => {
+  const api = await login({ appState: require('./appstate.json') });
+  api.listen((err, evt) => {
+    if (err) return console.error(err);
+    if (evt.body) api.sendMessage('Echo: ' + evt.body, evt.threadID);
+  });
+})();
+```
+**With Credentials + 2FA**
+```js
+const api = await login({ email: 'user@mail.com', password: 'pass', twofactor: 'TOTPSECRET' });
 ```
 
-- See `/nexloginsystem/README.md` for full API, advanced usage, and safety best practices.
-- For 2FA setup, see the guide in the login system docs.
+---
+## 🔐 Session & Device Management
+| Feature | Description | Config |
+|---------|-------------|--------|
+| Persistent Device | Reuses single profile (model, deviceId, UA) to reduce checkpoint triggers | Enabled by default (`persistentDeviceFile`) |
+| Preflight Validation | Multi-endpoint test (www/m/mbasic) + cookie heuristic | Disable via `{ disablePreflight: true }` |
+| Redirect Detection | Classifies `login_redirect`, `html_login_page` | Automatic |
+| 5xx Retry | Up to 5 bounded randomized delays | Built-in |
 
 ---
-
-## 📋 Table of Contents
-- [Enhanced Features](#enhanced-features)
-- [Architecture Overview](#architecture-overview)
-- [API Reference](#api-reference)
-- [Migration & Compatibility](#migration--compatibility)
-- [Advanced Usage](#advanced-usage)
-- [Troubleshooting](#troubleshooting)
-- [Community & Support](#community--support)
+## 🧠 Safety Layer Overview
+Component | Purpose
+--------- | -------
+Safety Limiter | Human-like delays, action pacing
+Session Guardian | Early logout & checkpoint detection
+Persistent Device | Stable fingerprint across sessions
+Error Classification | Structured types for automation logic
 
 ---
-
-## 🚀 Enhanced Features
-- **PerformanceManager**: Smart caching, metrics, and intelligent optimization
-- **Advanced ErrorHandler**: Retry logic, circuit breaker, and fallback strategies
-- **AdvancedMqttManager**: Auto-reconnect, heartbeat, and robust MQTT event handling
-- **Safety System**: Ultra-low ban rate with intelligent human behavior simulation
-- **Rich Message, Thread, User Classes**: Discord.js-style objects for easy, powerful bot logic
-- **EnhancedDatabase**: Persistent, high-speed storage for sessions, users, threads, and history
-- **Full TypeScript Support**: Modern, type-safe APIs and definitions
-- **Modern Command & Middleware System**: Event-driven, modular, and extensible
-- **Advanced MQTT Features**: Topic management, load balancing, and real-time monitoring
-- **Professional Logging**: Clean, colorized, and filterable logs for all environments
+## 🛰️ MQTT Enhancements (2.1.0)
+- Asynchronous preflight (no premature failure)
+- Second-chance validation before emitting `not_logged_in`
+- Better cookie reuse (no race on startup)
 
 ---
-
-## 🏗️ Architecture Overview
-- **PerformanceManager**: `lib/performance/PerformanceManager.js`
-- **ErrorHandler**: `lib/error/ErrorHandler.js`
-- **AdvancedMqttManager**: `lib/mqtt/AdvancedMqttManager.js`
-- **NexusClient**: `lib/compatibility/NexusClient.js`
-- **CompatibilityLayer**: `lib/compatibility/CompatibilityLayer.js`
-- **Message/Thread/User**: `lib/message/Message.js`, `Thread.js`, `User.js`
-- **EnhancedDatabase**: `lib/database/EnhancedDatabase.js`
-
----
-
-## 🛠️ API Reference
-
+## API Quick Reference
 ### Core Login
 ```js
-const login = require("nexus-fca");
-login({ appState: require("./appstate.json") }, (err, api) => { ... });
+login({ appState }, (err, api) => { /* legacy style */ });
+const api = await login({ email, password, twofactor });
 ```
-
-### Modern Client
+### Listening
 ```js
-const { NexusClient } = require('nexus-fca');
-const client = new NexusClient({ ...options });
-client.on('ready', ...);
-client.on('message', ...);
-client.login({ appState: ... });
+api.listen((err, event) => { /* message / event objects */ });
 ```
-
-### PerformanceManager
-- `getMetrics()` — Get real-time performance stats
-- `setCache(key, value, ttl)` — Set cache with TTL
-- `checkRateLimit(key, limit, window)` — Rate limiting
-
-### ErrorHandler
-- `retry(fn)` — Retry logic for async functions
-- `setFallback(method, fn)` — Fallback strategies
-- `getErrorStats()` — Error/circuit breaker stats
-
-### AdvancedMqttManager
-- `connect()` — Connect to MQTT
-- `on('connected')` — Event for connection
-- `startHeartbeat()` — Heartbeat monitoring
-
-### EnhancedDatabase
-- `saveUser(user)` — Save user data
-- `getMessages(threadId, limit)` — Get message history
-- `saveSession(session)` — Save session
-- `logEvent(type, data)` — Log analytics/events
-
-### CompatibilityLayer
-- `createWrapper('fca-unofficial' | 'ws3-fca' | 'fca-utils')` — API compatibility
-- `autoAdapt(api)` — Auto-adapt legacy API
-- `createLegacyApi()` — Legacy API helpers
-
-### Rich Message/Thread/User Objects
-- `message.reply()`, `message.react()`, `message.edit()`, `message.forward()`, `message.pin()`, `message.markAsRead()`
-- `thread.addUser()`, `thread.removeUser()`, `thread.changeName()`, `thread.getAdmins()`, `thread.makeAdmin()`
-- `user.sendMessage()`, `user.block()`, `user.unblock()`, `user.getSharedThreads()`
+### Sending
+```js
+api.sendMessage('Hi', threadID);
+```
+### Reactions / Typing
+```js
+api.setMessageReaction('❤', messageID, threadID, () => {});
+api.sendTypingIndicator(threadID);
+```
+### Utilities
+Exported via `require('nexus-fca').utils` including `validateSession`, formatting helpers, attachment normalization, safety utilities.
 
 ---
+## Structured Error Types (Examples)
+Type | Meaning
+---- | -------
+`login_redirect` | Server redirected to login/checkpoint
+`html_login_page` | HTML login or checkpoint page received
+`not_logged_in` | Verified invalid session after retry
+`JSON.parse error.` | Unexpected non-JSON payload
 
-## 🔄 Migration & Compatibility
-- **fca-unofficial**: All methods supported, drop-in replacement
-- **ws3-fca**: Compatible method names and event system
-- **fca-utils**: Modern client API, command/middleware system
-- **Migration helpers**: See `docs/Migration-fca-unofficial.md` for step-by-step guides
-
----
-
-## 🧑‍💻 Advanced Usage
-
-### Command System
+Use in logic:
 ```js
-client.on('command', async ({ name, args, message }) => {
-    if (name === 'ping') await message.reply('pong');
-});
-```
-
-### Middleware
-```js
-client.use((message, next) => {
-    // Custom logic
-    next();
-});
-```
-
-### Performance Monitoring
-```js
-const metrics = client.getMetrics();
-console.log(metrics);
-```
-
-### Error Handling
-```js
-client.on('error', (err) => {
-    console.error('Bot error:', err);
+api.listen((err) => {
+  if (err && err.type === 'not_logged_in') {
+    // Refresh appstate or alert
+  }
 });
 ```
 
 ---
-
-## 🛡️ Troubleshooting
-- **MQTT Connection Refused**: Check your `appstate.json`, resolve Facebook checkpoints, or try a new account.
-- **TypeScript Errors**: Ensure you are using the latest `index.d.ts` and TypeScript version.
-- **Other Issues**: See logs, check for updates, or open an issue on GitHub.
-
----
-
-## 💬 Community & Support
-- **GitHub**: [github.com/Nexus-016/Nexus-fCA](https://github.com/Nexus-016/Nexus-fCA)
-- **Docs**: See `/docs` for per-feature usage and migration
-- **Contributions**: PRs and issues welcome!
+## Migration (2.0.x → 2.1.0)
+Old Behavior | New Behavior | Action
+------------ | ------------ | ------
+Random device each login | Persistent device | None (improves trust) |
+Immediate preflight fail | Silent retry then classify | Adjust logging if needed |
+Callback-only login | Promise + callback hybrid | Remove manual promisify |
+Generic status code errors | Structured `error.type` fields | Update error filters |
 
 ---
+## Troubleshooting
+Issue | Suggestion
+----- | ----------
+False logout log | Ensure not disabling cookies; rely on new validation
+Checkpoint after password login | Keep persistent device; avoid frequent password relogins; reuse appstate
+Repeated 5xx retries | Inspect network / proxy; consider backoff strategy wrapper
+No messages received | Verify MQTT topics, ensure `listen` not replaced by older code
 
-## ⚠️ Disclaimer
-Nexus-FCA is not affiliated with Facebook. Use responsibly and at your own risk. Automation may violate Facebook’s terms of service.
+---
+## FAQ
+Q: How to speed up without raising risk?  
+A: Tune delay config in safety limiter; keep persistent device enabled; avoid burst sends.  
+Q: Can I rotate devices manually?  
+A: Delete `persistent-device.json` and re-run with `persistentDevice: true` for a new stable profile.  
+Q: Disable safety layer for testing?  
+A: Use `{ disablePreflight: true }` and adjust globalOptions, but not recommended in production.
+
+---
+## Disclaimer
+Not affiliated with Facebook. Use at your own risk. Respect platform terms.
+
+---
+## Support & Contributing
+- Issues / PRs: GitHub repository
+- Focus areas: Safety updates, GraphQL doc_id refresh, performance, TypeScript types

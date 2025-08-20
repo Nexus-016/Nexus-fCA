@@ -128,6 +128,23 @@ function buildStream(options, WebSocket, Proxy) {
   return Stream;
 }
 function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
+  // Improved preflight with option to disable
+  if (!ctx.globalOptions.disablePreflight) {
+    (async () => {
+      try {
+        await utils.validateSession(ctx, defaultFuncs, { retries: 2, delayMs: 1000 });
+      } catch (e) {
+        // Suppress first failure; only emit if still bad after short grace period
+        setTimeout(() => {
+          utils.validateSession(ctx, defaultFuncs, { retries: 0 }).catch(err2 => {
+            log.error("listenMqtt", "Session invalid after retry: Not logged in.");
+            ctx.loggedIn = false;
+            globalCallback({ type: "not_logged_in", error: "Session invalid (post-retry)." });
+          });
+        }, 2000);
+      }
+    })();
+  }
   const chatOn = ctx.globalOptions.online;
   const foreground = false;
   const sessionID = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) + 1;
@@ -218,6 +235,12 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   mqttClient.on('error', function (err) {
     log.error("listenMqtt", err);
     mqttClient.end();
+    // classify redirect/login errors surfaced through upstream logic
+    const errMsg = (err && (err.error || err.message || "")).toString();
+    if (/not logged in|login_redirect|html_login_page/i.test(errMsg)) {
+      ctx.loggedIn = false;
+      return globalCallback({ type: "not_logged_in", error: errMsg });
+    }
     if (ctx.globalOptions.autoReconnect) {
       listenMqtt(defaultFuncs, api, ctx, globalCallback);
     } else {
