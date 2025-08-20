@@ -1552,12 +1552,80 @@ const rateLimiter = {
   }
 };
 
-module.exports.rateLimiter = rateLimiter;
-module.exports.smartSafetyLimiter = smartSafetyLimiter;
-module.exports.safeMode = safeMode;
-module.exports.ultraSafeMode = ultraSafeMode;
-module.exports.isUserAllowed = isUserAllowed;
+// Add robust session validation utility used by listenMqtt
+async function validateSession(ctx, defaultFuncs, opts = {}) {
+    const { retries = 0, delayMs = 750 } = opts || {};
+    if (!ctx || !ctx.jar) {
+        throw new CustomError({ message: 'No context/jar provided', type: 'not_logged_in' });
+    }
+    const cookies = ctx.jar.getCookies('https://www.facebook.com');
+    const hasUser = cookies.some(c => (c.key || c.name) === 'c_user');
+    if (!hasUser) {
+        throw new CustomError({ message: 'Not logged in (missing c_user cookie)', type: 'not_logged_in' });
+    }
 
+    const endpoints = [
+        'https://www.facebook.com/ajax/mercury/threadlist_info.php?client=mercury',
+        'https://m.facebook.com/me'
+    ];
+
+    function isHtmlLoginPage(body) {
+        if (!body || typeof body !== 'string') return false;
+        if (body.length < 40) return false;
+        const lowered = body.toLowerCase();
+        return (
+            (lowered.includes('login') && lowered.includes('password')) ||
+            lowered.includes('m_login_email') ||
+            lowered.includes('/login/device-based')
+        );
+    }
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        let allPassed = true;
+        for (const url of endpoints) {
+            try {
+                // Prefer provided defaultFuncs.get if available (applies defaults & fb_dtsg)
+                const res = defaultFuncs && defaultFuncs.get
+                    ? await defaultFuncs.get(url, ctx.jar, {})
+                    : await get(url, ctx.jar, null, ctx.globalOptions, ctx);
+
+                const status = res && res.statusCode;
+                const body = res && res.body ? res.body.toString() : '';
+
+                if (status >= 300 && status < 400) {
+                    throw new CustomError({ message: 'Login redirect detected', type: 'login_redirect', statusCode: status });
+                }
+                if (status === 0 || status === undefined) {
+                    throw new CustomError({ message: 'No status code (network?)', type: 'network_error' });
+                }
+                if (status === 401 || status === 403) {
+                    throw new CustomError({ message: 'Unauthorized / forbidden', type: 'not_logged_in', statusCode: status });
+                }
+                if (isHtmlLoginPage(body)) {
+                    throw new CustomError({ message: 'HTML login page served', type: 'html_login_page' });
+                }
+                // Basic heuristic: body containing checkpoint indicators
+                if (/checkpoint|review recent login/i.test(body)) {
+                    throw new CustomError({ message: 'Checkpoint required', type: 'checkpoint' });
+                }
+            } catch (err) {
+                allPassed = false;
+                if (attempt >= retries) {
+                    // Re-throw final classified error (ensure type present)
+                    if (err instanceof CustomError) throw err;
+                    throw new CustomError({ message: err.message || 'Session invalid', type: err.type || 'not_logged_in', original: err });
+                }
+                break; // break inner loop to retry endpoints
+            }
+        }
+        if (allPassed) return true;
+        if (attempt < retries) await delay(delayMs);
+    }
+    // Fallback (should not reach)
+    throw new CustomError({ message: 'Unknown session validation failure', type: 'not_logged_in' });
+}
+
+// Preserve earlier named exports while adding validateSession
 module.exports = {
     CustomError,
     cleanHTML,
@@ -1607,4 +1675,10 @@ module.exports = {
     getAccessFromBusiness,
     getFroms,
     validateSession,
+    // Safety & rate limiting exports
+    rateLimiter,
+    smartSafetyLimiter,
+    safeMode,
+    ultraSafeMode,
+    isUserAllowed
 };
