@@ -1,7 +1,8 @@
 # Nexus-FCA v2.1.0
 
 <p align="center">
-  <img src="https://i.ibb.co.com/hxYFrk0K/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="520" />
+  <!-- Preview image wrapped in link (corrected ibb.co domain) -->
+  <a href="https://ibb.co/8ymR1tw"><img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA Dragon Fruit" width="520" border="0" /></a>
 </p>
 
 > Advanced, safe, modern Facebook Chat (Messenger) API with integrated secure login (ID / Password / 2FA), ultra‑low ban rate session management, MQTT listener, and TypeScript-ready developer experience.
