@@ -10,6 +10,33 @@ const path = require('path');
 const models = require("./lib/database/models");
 const logger = require("./lib/logger");
 const { safeMode, ultraSafeMode, smartSafetyLimiter, isUserAllowed } = require('./utils'); // Enhanced safety system
+// Minimal aesthetic banner system
+let _fancyBannerPrinted = false;
+const gradient = (() => { try { return require('gradient-string'); } catch(_) { return null; } })();
+const pkgMeta = (() => { try { return require('./package.json'); } catch(_) { return { version: 'dev' }; } })();
+function printFancyStartupBanner() {
+  if (_fancyBannerPrinted) return; _fancyBannerPrinted = true;
+  const lines = [
+    '╔══════════════════════════════════════════════════════╗',
+    '║ Nexus-FCA Secure Login                               ║',
+    '║ Advanced Stable Messenger Automation API             ║',
+    '╚══════════════════════════════════════════════════════╝'
+  ];
+  if (gradient) console.log(gradient.cristal.multiline(lines.join('\n'))); else console.log(lines.join('\n'));
+}
+function printIdentityBanner(uid, name) {
+  const cleanName = name || 'Unknown';
+  const pad = (txt, len) => (txt.length < len ? txt + ' '.repeat(len - txt.length) : txt.substring(0, len));
+  const bodyLen = 54;
+  const line = (content) => `║ ${pad(content, bodyLen)} ║`;
+  const box = [
+    '╔════════════════ LOGGED IN IDENTITY ════════════════╗',
+    line(`UID : ${uid}`),
+    line(`Name: ${cleanName}`),
+    '╚════════════════════════════════════════════════════╝'
+  ];
+  if (gradient) console.log(gradient.atlas.multiline(box.join('\n'))); else console.log(box.join('\n'));
+}
 
 // Enhanced imports - All new modules
 const { NexusClient } = require('./lib/compatibility/NexusClient');
@@ -208,7 +235,9 @@ function buildAPI(globalOptions, html, jar) {
     firstListen: true,
     fb_dtsg,
     wsReqNumber: 0,
-    wsTaskNumber: 0
+    wsTaskNumber: 0,
+    // Provide safety module reference to lower layers (listenMqtt)
+    globalSafety
   };
   const api = {
     setOptions: setOptions.bind(null, globalOptions),
@@ -269,6 +298,59 @@ function buildAPI(globalOptions, html, jar) {
         console.error("An error occurred while refreshing fb_dtsg", err);
       });
   }, 1000 * 60 * 60 * 24);
+  // === Group Queue (No Cooldown, Sequential per group) ===
+  (function initGroupQueue(){
+    const groupQueues = new Map(); // threadID -> { q: [], sending: false }
+    const isGroupThread = (tid) => typeof tid === 'string' && tid.length >= 15; // simple heuristic
+    const DIRECT_FN = api.sendMessage; // original
+
+    api.enableGroupQueue = function(enable=true){
+      globalOptions.groupQueueEnabled = !!enable;
+    };
+    api.setGroupQueueCapacity = function(n){ globalOptions.groupQueueMax = n; };
+    api.enableGroupQueue(true);
+    api.setGroupQueueCapacity(100); // allow up to 100 pending per group
+
+    api._sendMessageDirect = DIRECT_FN;
+    api.sendMessage = function(message, threadID, cb){
+      if(!globalOptions.groupQueueEnabled || !isGroupThread(threadID)) {
+        return api._sendMessageDirect(message, threadID, cb);
+      }
+      let entry = groupQueues.get(threadID);
+      if(!entry){ entry = { q: [], sending: false }; groupQueues.set(threadID, entry); }
+      if(entry.q.length >= (globalOptions.groupQueueMax||100)) {
+        // drop oldest (keep newest) to avoid unbounded growth
+        entry.q.shift();
+      }
+      entry.q.push({ message, threadID, cb });
+      processQueue(threadID, entry);
+    };
+
+    function processQueue(threadID, entry){
+      if(entry.sending) return;
+      if(!entry.q.length) return;
+      entry.sending = true;
+      const { message, threadID: tid, cb } = entry.q.shift();
+      api._sendMessageDirect(message, tid, function(err, res){
+        try { if(!err) globalSafety.recordEvent(); } catch(_) {}
+        if(typeof cb === 'function') cb(err, res);
+        entry.sending = false;
+        // Immediately process next (no cooldown) to keep strict sequence
+        setImmediate(()=>processQueue(threadID, entry));
+      });
+    }
+
+    api._flushGroupQueue = function(threadID){
+      const entry = groupQueues.get(threadID);
+      if(!entry) return;
+      while(entry.q.length) {
+        const item = entry.q.shift();
+        api._sendMessageDirect(item.message, item.threadID, item.cb);
+      }
+      entry.sending = false;
+    };
+  })();
+  // === End Group Queue ===
   return {
     ctx,
     defaultFuncs,
@@ -364,12 +446,25 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       if (!safetyStatus.safe) {
         logger(`⚠️ Login safety warning: ${safetyStatus.reason}`, 'warn');
       }
-      
       logger('✅ Session authenticated successfully', 'info');
-      
       // Initialize safety monitoring
       globalSafety.startMonitoring(ctx, api);
-      
+      // Post-login identity banner
+      try {
+        const uid = api.getCurrentUserID && api.getCurrentUserID();
+        if (api.getUserInfo && uid) {
+          api.getUserInfo(uid, (err, info) => {
+            if (!err && info) {
+              const userObj = info[uid] || info; // depending on structure
+              printIdentityBanner(uid, userObj.name || userObj.firstName || userObj.fullName);
+            } else {
+              printIdentityBanner(uid || 'N/A');
+            }
+          });
+        } else {
+          printIdentityBanner(uid || 'N/A');
+        }
+      } catch(_) { /* ignore */ }
       callback(null, api);
     })
     .catch(e => {
@@ -893,6 +988,7 @@ class IntegratedNexusLoginSystem {
 
 // Integrated Nexus Login wrapper for easy usage
 async function integratedNexusLogin(credentials = null, options = {}) {
+    printFancyStartupBanner();
     const loginSystem = new IntegratedNexusLoginSystem(options);
     
     // Professional logging system
@@ -1008,6 +1104,7 @@ async function integratedNexusLogin(credentials = null, options = {}) {
  * - Appstate only: Uses existing session directly
  */
 async function login(loginData, options = {}, callback) {
+  printFancyStartupBanner();
   // Support multiple callback signatures
   if (typeof options === 'function') {
     callback = options;

@@ -260,6 +260,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     }
   });
   mqttClient.on("connect", function () {
+    if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch(_) {} }
     if (process.env.OnStatus === undefined) {
       logger("Nexus-FCA premium features works only with Nexus-Bot framework(Kidding)", "info");
       process.env.OnStatus = true;
@@ -311,6 +312,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     };
   });
   mqttClient.on("message", function (topic, message, _packet) {
+    if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch(_) {} }
     try {
       let jsonMessage = Buffer.isBuffer(message)
         ? Buffer.from(message).toString()
@@ -404,8 +406,21 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       return;
     }
   });
-  mqttClient.on("close", function () {});
-  mqttClient.on("disconnect", () => {});
+  mqttClient.on("close", function () { if (ctx.globalSafety) { try { ctx.globalSafety._ensureMqttAlive(); } catch(_) {} } });
+  mqttClient.on("disconnect", () => { if (ctx.globalSafety) { try { ctx.globalSafety._ensureMqttAlive(); } catch(_) {} } });
+  // Lightweight periodic synthetic event to prevent idle expiry if FB sends nothing
+  if (!ctx._syntheticKeepAliveInterval) {
+    ctx._syntheticKeepAliveInterval = setInterval(() => {
+      if (!ctx.mqttClient || !ctx.mqttClient.connected) return;
+      if (ctx.globalSafety) {
+        const idle = Date.now() - ctx.globalSafety._lastEventTs;
+        // Inject synthetic event every 70s if no real traffic -> keeps timers fresh
+        if (idle > 65 * 1000) {
+          ctx.globalSafety.recordEvent();
+        }
+      }
+    }, 30000);
+  }
 }
 function getTaskResponseData(taskType, payload) {
   try {

@@ -4,10 +4,14 @@
 ### Added
 - Soft-stale probing at 2 minutes idle (ping + conditional forced reconnect if no events within 5-8s)
 - Wrapper around `listenMqtt` to automatically feed events into safety heartbeat (`recordEvent`) for precise idle detection
+- Ghost connection detection (10m silent but socket connected triggers forced reconnect after probe)
+- Periodic connection recycle every ~6h ±30m to prevent long-lived silent degradation
+- Force reconnect API: `globalSafety.forceReconnect(tag)`
 
 ### Improved
 - Faster recovery from silent idle states (previously required >5 min or external trigger)
 - Reduced chance of appearing online but unresponsive after short inactivity
+- Added keepalive foreground_state publishes each heartbeat
 
 ---
 
