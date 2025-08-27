@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.1.2] - Unreleased - CONTINUOUS IDLE RECOVERY
+### Added
+- Soft-stale probing at 2 minutes idle (ping + conditional forced reconnect if no events within 5-8s)
+- Wrapper around `listenMqtt` to automatically feed events into safety heartbeat (`recordEvent`) for precise idle detection
+
+### Improved
+- Faster recovery from silent idle states (previously required >5 min or external trigger)
+- Reduced chance of appearing online but unresponsive after short inactivity
+
+---
+
 ## [2.1.1] - 2025-08-27 - ADVANCED SESSION STABILITY
 ### 🛠 Added
 - Adaptive safe session refresh interval (dynamic based on risk level)

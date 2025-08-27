@@ -1,6 +1,6 @@
 {
   "name": "nexus-fca",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "A modern, safe, and advanced Facebook Chat API for Node.js with fully integrated Nexus Login System. NPM-ready with ID/password/2FA support, ultra-low ban rate protection, and zero external dependencies.",
   "main": "index.js",
   "repository": {

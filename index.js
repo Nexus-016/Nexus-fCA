@@ -239,6 +239,26 @@ function buildAPI(globalOptions, html, jar) {
       api[v.replace(".js", "")] = require("./src/" + v)(defaultFuncs, api, ctx);
     });
   api.listen = api.listenMqtt;
+  // Safety wrapper: ensure every inbound MQTT event updates safety lastEvent timestamp
+  if (!api._safetyWrappedListen) {
+    const _origListen = api.listenMqtt;
+    api.listenMqtt = function(callback) {
+      const wrapped = (err, evt) => {
+        if (!err && evt) {
+          try { globalSafety.recordEvent(); } catch(_) {}
+        }
+        if (typeof callback === 'function') callback(err, evt);
+      };
+      const emitter = _origListen(wrapped);
+      // Redundant defensive hooks
+      try {
+        emitter.on('message', () => globalSafety.recordEvent());
+        emitter.on('error', () => globalSafety.recordEvent());
+      } catch(_) {}
+      return emitter;
+    };
+    api._safetyWrappedListen = true;
+  }
   setInterval(async () => {
     api
       .refreshFb_dtsg()
