@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.1.1] - 2025-08-27 - ADVANCED SESSION STABILITY
+### 🛠 Added
+- Adaptive safe session refresh interval (dynamic based on risk level)
+- Heartbeat + watchdog timers to detect stale MQTT connections early
+- Progressive backoff with jitter for MQTT reconnect attempts
+- Layered post-refresh health checks (1s / 10s / 30s) to catch silent drops
+- Abortable refresh with timeout safeguard (25s) to prevent hangs
+- Automatic reconnection trigger if no events within thresholds (2m soft, 15m hard)
+- `destroy()` method to cleanup timers/listeners (prevents memory leaks)
+
+### 🔄 Changed
+- Safe refresh now records in‑flight ID and supersedes outdated checks
+- Reconnect logic centralized in `_reconnectMqttWithBackoff`
+
+### ✅ Improved
+- Stability after long runtimes / multiple token refresh cycles
+- Reduced risk of listener not resuming after refresh
+
+---
+
 ## [2.1.0] - 2025-08-20 - SESSION RELIABILITY & PROMISE LOGIN
 ### 🚀 Highlights
 Stability-focused release improving long‑running bot sessions, reducing false `not_logged_in` events, and modernizing the login flow.
