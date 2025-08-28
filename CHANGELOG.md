@@ -1,6 +1,42 @@
 # Changelog
 
-## [2.1.2] - Unreleased - CONTINUOUS IDLE RECOVERY
+## [2.1.5] - 2025-08-28 - PendingEdits & ACK Metrics
+### Added
+- PendingEdits buffer with cap (default 200) + TTL (5m) + resend attempts (2) + ACK timeout (12s).
+- Automatic edit resend watchdog with safe limits and metrics (editResends, editFailed, pendingEditsDropped, pendingEditsExpired).
+- API: `api.setEditOptions({ maxPendingEdits, editTTLms, ackTimeoutMs, maxResendAttempts })`.
+- Edit ACK integration: pending edit removed on ACK receipt.
+- Health metrics: p95AckLatencyMs, editResends, editFailed.
+
+### Improved
+- Safer edit pipeline: prevents uncontrolled retries, bounds memory, tracks expirations.
+- Enhanced HealthMetrics with percentile latency sample retention (50-sample window).
+
+### Notes
+- Durable outbound queue & metrics exporter planned next.
+
+---
+
+## [2.1.4] - Adaptive Backoff & Core Metrics
+### Added
+- Adaptive reconnect backoff with jitter (caps at 5 minutes) for safer, stealthier recovery loops.
+- Lazy preflight session validation (skips heavy validation if a recent successful connect occurred) toggle via `api.enableLazyPreflight()`.
+- Health metrics collector (uptime, idle time, reconnect counts, failures, message/ack counters, synthetic keepalives) accessible with `api.getHealthMetrics()` and included in `api.healthCheck()`.
+- Randomized synthetic keepalive interval (55-75s) to reduce detection patterns.
+- Backoff configuration hook: `api.setBackoffOptions()`.
+
+### Improved
+- Reduced noisy session validation on every `listenMqtt` invocation unless needed.
+- More structured error classification feeding metrics (`session_invalid`, `timeout_no_t_ms`, `mqtt_error`, `message_parse`, `not_logged_in`).
+
+### Planned (Next)
+- ACK tracking refinement & resend logic.
+- Pending edits buffer with TTL and cap.
+- Durable outbound queue & health exporter.
+
+---
+
+## [2.1.2] - CONTINUOUS IDLE RECOVERY
 ### Added
 - Soft-stale probing at 2 minutes idle (ping + conditional forced reconnect if no events within 5-8s)
 - Wrapper around `listenMqtt` to automatically feed events into safety heartbeat (`recordEvent`) for precise idle detection

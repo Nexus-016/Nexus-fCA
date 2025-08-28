@@ -205,14 +205,26 @@ module.exports = function (defaultFuncs, api, ctx) {
 			task.payload = JSON.stringify(task.payload);
 		});
 		form.payload = JSON.stringify(form.payload);
-		console.log(global.jsonStringifyColor(form, null, 2));
+		try { console.log(global.jsonStringifyColor(form, null, 2)); } catch (_) { }
+
+		// Stage 2: outbound tracking for ACK latency
+		if (!ctx._pendingOutbound) ctx._pendingOutbound = new Map();
+		let midCandidate = null;
+		try {
+			const parsed = JSON.parse(form.payload);
+			const firstTask = parsed.tasks && parsed.tasks[0] && JSON.parse(parsed.tasks[0].payload);
+			if (firstTask && firstTask.otid) midCandidate = String(firstTask.otid);
+		} catch (_) { }
+		if (midCandidate) {
+			ctx._pendingOutbound.set(midCandidate, Date.now());
+			if (ctx.health) ctx.health.trackOutbound(ctx._pendingOutbound.size);
+		}
 
 		return mqttClient.publish("/ls_req", JSON.stringify(form), function (err, data) {
 			if (err) {
-				console.error('Error publishing message: ', err);
+				if (ctx.health) ctx.health.onError('publish_fail');
 				callback(err);
 			} else {
-				console.log('Message published successfully with data: ', data);
 				callback(null, data);
 			}
 		});

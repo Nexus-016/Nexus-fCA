@@ -11,6 +11,7 @@ var identity = function () {};
 var form = {};
 var getSeqID = function () {};
 const logger = require("../lib/logger.js");
+const { HealthMetrics } = require("../lib/health/HealthMetrics");
 
 // Enhanced imports
 const MqttManager = require("../lib/mqtt/MqttManager");
@@ -38,6 +39,43 @@ const topics = [
   "/webrtc_response",
 ];
 let WebSocket_Global;
+// Adaptive backoff state (per-process singleton like) - tie to ctx
+function getBackoffState(ctx){
+  if(!ctx._adaptiveReconnect){
+    ctx._adaptiveReconnect = {
+      base: 1000,          // 1s
+      max: 5 * 60 * 1000,  // 5m
+      factor: 2,
+      jitter: 0.25,        // 25% random
+      current: 0,
+      lastResetTs: 0
+    };
+  }
+  return ctx._adaptiveReconnect;
+}
+function computeNextDelay(state){
+  if(!state.current) state.current = state.base;
+  else state.current = Math.min(state.max, state.current * state.factor);
+  // jitter
+  const rand = (Math.random() * 2 - 1) * state.jitter; // -j..+j
+  const delay = Math.max(500, Math.round(state.current * (1 + rand)));
+  return delay;
+}
+function resetBackoff(state){
+  state.current = 0;
+  state.lastResetTs = Date.now();
+}
+// Build lazy preflight gating
+function shouldRunPreflight(ctx){
+  if(ctx.globalOptions.disablePreflight) return false;
+  // If we connected successfully within last 10 minutes, skip heavy preflight to reduce surface.
+  const now = Date.now();
+  const metrics = ctx.health;
+  if(metrics && metrics.lastConnectTs && (now - metrics.lastConnectTs) < 10*60*1000){
+    return false;
+  }
+  return true;
+}
 function buildProxy() {
   const Proxy = new Transform({
     objectMode: false,
@@ -128,20 +166,23 @@ function buildStream(options, WebSocket, Proxy) {
   return Stream;
 }
 function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
-  // Improved preflight with option to disable
-  if (!ctx.globalOptions.disablePreflight) {
+  // Attach health metrics container lazily
+  if(!ctx.health) ctx.health = new (require('../lib/health/HealthMetrics').HealthMetrics)();
+  const backoff = getBackoffState(ctx);
+  const runPreflight = shouldRunPreflight(ctx);
+  if (runPreflight) {
     (async () => {
       try {
-        await utils.validateSession(ctx, defaultFuncs, { retries: 2, delayMs: 1000 });
+        await utils.validateSession(ctx, defaultFuncs, { retries: 1, delayMs: 1000 });
       } catch (e) {
-        // Suppress first failure; only emit if still bad after short grace period
         setTimeout(() => {
           utils.validateSession(ctx, defaultFuncs, { retries: 0 }).catch(err2 => {
             log.error("listenMqtt", "Session invalid after retry: Not logged in.");
             ctx.loggedIn = false;
+            ctx.health.onError('session_invalid');
             globalCallback({ type: "not_logged_in", error: "Session invalid (post-retry)." });
           });
-        }, 2000);
+        }, 1500);
       }
     })();
   }
@@ -170,6 +211,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     p: null,
     php_override: ""
   };
+  // jitter user agent keep consistent
   const cookies = ctx.jar.getCookies("https://www.facebook.com").join("; ");
   let host;
   if (ctx.mqttEndpoint) {
@@ -233,33 +275,40 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   const mqttClient = ctx.mqttClient;
   global.mqttClient = mqttClient;
   mqttClient.on('error', function (err) {
-    log.error("listenMqtt", err);
-    mqttClient.end();
-    // classify redirect/login errors surfaced through upstream logic
     const errMsg = (err && (err.error || err.message || "")).toString();
+    ctx.health.onError(errMsg.includes('not logged in') ? 'not_logged_in' : 'mqtt_error');
+    log.error("listenMqtt", errMsg);
+    try { mqttClient.end(true); } catch(_){ }
     if (/not logged in|login_redirect|html_login_page/i.test(errMsg)) {
       ctx.loggedIn = false;
       return globalCallback({ type: "not_logged_in", error: errMsg });
     }
     if (ctx.globalOptions.autoReconnect) {
-      listenMqtt(defaultFuncs, api, ctx, globalCallback);
+      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
     } else {
       utils.checkLiveCookie(ctx, defaultFuncs)
-        .then(res => {
-          globalCallback({
-            type: "stop_listen",
-            error: "Connection refused: Server unavailable"
-          }, null);
-        })
-        .catch(err => {
-          globalCallback({
-            type: "account_inactive",
-            error: "Maybe your account is blocked by facebook, please login and check at https://facebook.com"
-          }, null);
-        });
+        .then(() => globalCallback({ type: "stop_listen", error: "Connection refused: Server unavailable" }))
+        .catch(() => globalCallback({ type: "account_inactive", error: "Maybe your account is blocked by facebook, please login and check at https://facebook.com" }));
+    }
+  });
+  // Ensure reconnection also triggers on unexpected close without prior error
+  mqttClient.on('close', function () {
+    ctx.health.onDisconnect();
+    if (!ctx.loggedIn) return; // avoid loops if logged out
+    if (ctx.globalOptions.autoReconnect) {
+      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
+    }
+  });
+  mqttClient.on('disconnect', function(){
+    ctx.health.onDisconnect();
+    if (!ctx.loggedIn) return;
+    if (ctx.globalOptions.autoReconnect) {
+      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
     }
   });
   mqttClient.on("connect", function () {
+    resetBackoff(backoff);
+    ctx.health.onConnect();
     if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch(_) {} }
     if (process.env.OnStatus === undefined) {
       logger("Nexus-FCA premium features works only with Nexus-Bot framework(Kidding)", "info");
@@ -296,9 +345,11 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       JSON.stringify({ make_user_available_when_in_foreground: true }),
       { qos: 1 }
     );
+    // Replace fixed rTimeout reconnect with health-driven logic
     const rTimeout = setTimeout(function () {
+      ctx.health.onError('timeout_no_t_ms');
       mqttClient.end();
-      listenMqtt(defaultFuncs, api, ctx, globalCallback);
+      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
     }, 5000);
     ctx.tmsWait = function () {
       clearTimeout(rTimeout);
@@ -312,15 +363,35 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     };
   });
   mqttClient.on("message", function (topic, message, _packet) {
+    ctx.health.onMessage();
     if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch(_) {} }
     try {
       let jsonMessage = Buffer.isBuffer(message)
         ? Buffer.from(message).toString()
         : message;
-      try {
-        jsonMessage = JSON.parse(jsonMessage);
-      } catch (e) {
-        jsonMessage = {};
+      try { jsonMessage = JSON.parse(jsonMessage); } catch (e) { jsonMessage = {}; }
+      // ACK tracking: detect send acknowledgements with latency hint if present
+      if (jsonMessage?.message_ack) {
+        const ack = jsonMessage.message_ack;
+        const mid = ack.message_id || ack.mid;
+        if(mid && ctx._pendingOutbound && ctx._pendingOutbound.has(mid)){
+          const started = ctx._pendingOutbound.get(mid);
+            ctx._pendingOutbound.delete(mid);
+            const latency = Date.now() - started;
+            ctx.health.onAck(latency);
+        } else {
+          ctx.health.onAck();
+        }
+        // If this ACK corresponds to an edit, clear from pendingEdits
+        if(mid && ctx.pendingEdits && ctx.pendingEdits.has(mid)){
+          ctx.pendingEdits.delete(mid);
+          if(ctx.health) ctx.health.removePendingEdit(mid);
+        }
+      }
+      if (jsonMessage?.type === 'ack') { ctx.health.onAck(); }
+      // lightweight ack detection heuristic
+      if (jsonMessage?.type === 'ack' || jsonMessage?.message_ack) {
+        ctx.health.onAck();
       }
       if (jsonMessage.type === "jewel_requests_add") {
         globalCallback(null, {
@@ -335,53 +406,15 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
           timestamp: Date.now().toString(),
         });
       } else if (topic === "/t_ms") {
-        if (ctx.tmsWait && typeof ctx.tmsWait == "function") {
-          ctx.tmsWait();
-        }
-        if (jsonMessage.firstDeltaSeqId && jsonMessage.syncToken) {
-          ctx.lastSeqId = jsonMessage.firstDeltaSeqId;
-          ctx.syncToken = jsonMessage.syncToken;
-        }
-        if (jsonMessage.lastIssuedSeqId) {
-          ctx.lastSeqId = parseInt(jsonMessage.lastIssuedSeqId);
-        }
-        for (const i in jsonMessage.deltas) {
-          const delta = jsonMessage.deltas[i];
-          parseDelta(defaultFuncs, api, ctx, globalCallback, {
-            delta: delta,
-          });
-        }
-      } else if (
-        topic === "/thread_typing" ||
-        topic === "/orca_typing_notifications"
-      ) {
-        const typ = {
-          type: "typ",
-          isTyping: !!jsonMessage.state,
-          from: jsonMessage.sender_fbid.toString(),
-          threadID: utils.formatID(
-            (jsonMessage.thread || jsonMessage.sender_fbid).toString()
-          ),
-        };
-        (function () {
-          globalCallback(null, typ);
-        })();
+        if (ctx.tmsWait && typeof ctx.tmsWait == "function") { ctx.tmsWait(); }
+        if (jsonMessage.firstDeltaSeqId && jsonMessage.syncToken) { ctx.lastSeqId = jsonMessage.firstDeltaSeqId; ctx.syncToken = jsonMessage.syncToken; }
+        if (jsonMessage.lastIssuedSeqId) { ctx.lastSeqId = parseInt(jsonMessage.lastIssuedSeqId); }
+        for (const i in jsonMessage.deltas) { const delta = jsonMessage.deltas[i]; parseDelta(defaultFuncs, api, ctx, globalCallback, { delta: delta, }); }
+      } else if ( topic === "/thread_typing" || topic === "/orca_typing_notifications" ) {
+        const typ = { type: "typ", isTyping: !!jsonMessage.state, from: jsonMessage.sender_fbid.toString(), threadID: utils.formatID( (jsonMessage.thread || jsonMessage.sender_fbid).toString() ), };
+        (function () { globalCallback(null, typ); })();
       } else if (topic === "/orca_presence") {
-        if (!ctx.globalOptions.updatePresence) {
-          for (const i in jsonMessage.list) {
-            const data = jsonMessage.list[i];
-            const userID = data["u"];
-            const presence = {
-              type: "presence",
-              userID: userID.toString(),
-              timestamp: data["l"] * 1000,
-              statuses: data["p"],
-            };
-            (function () {
-              globalCallback(null, presence);
-            })();
-          }
-        }
+        if (!ctx.globalOptions.updatePresence) { for (const i in jsonMessage.list) { const data = jsonMessage.list[i]; const userID = data["u"]; const presence = { type: "presence", userID: userID.toString(), timestamp: data["l"] * 1000, statuses: data["p"], }; (function () { globalCallback(null, presence); })(); } }
       } else if (topic == "/ls_resp") {
         const parsedPayload = JSON.parse(jsonMessage.payload);
         const reqID = jsonMessage.request_id;
@@ -389,38 +422,35 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
           const taskData = ctx["tasks"].get(reqID);
           const { type: taskType, callback: taskCallback } = taskData;
           const taskRespData = getTaskResponseData(taskType, parsedPayload);
-          if (taskRespData == null) {
-            taskCallback("error", null);
-          } else {
-            taskCallback(null, {
-              type: taskType,
-              reqID: reqID,
-              ...taskRespData,
-            });
-          }
+          if (taskRespData == null) { taskCallback("error", null); } else { taskCallback(null, { type: taskType, reqID: reqID, ...taskRespData, }); }
         }
       }
     } catch (ex) {
+      ctx.health.onError('message_parse');
       console.error("Message parsing error:", ex);
       if (ex.stack) console.error(ex.stack);
       return;
     }
   });
-  mqttClient.on("close", function () { if (ctx.globalSafety) { try { ctx.globalSafety._ensureMqttAlive(); } catch(_) {} } });
-  mqttClient.on("disconnect", () => { if (ctx.globalSafety) { try { ctx.globalSafety._ensureMqttAlive(); } catch(_) {} } });
-  // Lightweight periodic synthetic event to prevent idle expiry if FB sends nothing
+  mqttClient.on("close", function () { ctx.health.onDisconnect(); if (ctx.globalSafety) { try { ctx.globalSafety._ensureMqttAlive(); } catch(_) {} } });
+  mqttClient.on("disconnect", () => { ctx.health.onDisconnect(); if (ctx.globalSafety) { try { ctx.globalSafety._ensureMqttAlive(); } catch(_) {} } });
+  // Synthetic keepalive with randomized cadence (55-75s) to appear human and keep state alive
   if (!ctx._syntheticKeepAliveInterval) {
     ctx._syntheticKeepAliveInterval = setInterval(() => {
       if (!ctx.mqttClient || !ctx.mqttClient.connected) return;
       if (ctx.globalSafety) {
         const idle = Date.now() - ctx.globalSafety._lastEventTs;
-        // Inject synthetic event every 70s if no real traffic -> keeps timers fresh
-        if (idle > 65 * 1000) {
-          ctx.globalSafety.recordEvent();
-        }
+        if (idle > 65 * 1000) { ctx.globalSafety.recordEvent(); ctx.health.onSynthetic(); }
       }
-    }, 30000);
+    }, 55000 + Math.floor(Math.random()*20000));
   }
+}
+function scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback){
+  const state = getBackoffState(ctx);
+  const delay = computeNextDelay(state);
+  ctx.health.onReconnectScheduled(delay);
+  log.warn('listenMqtt', `Reconnecting in ${delay} ms (adaptive backoff)`);
+  setTimeout(()=>listenMqtt(defaultFuncs, api, ctx, globalCallback), delay);
 }
 function getTaskResponseData(taskType, payload) {
   try {

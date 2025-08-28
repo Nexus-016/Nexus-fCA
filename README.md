@@ -1,4 +1,7 @@
-# Nexus-FCA v2.1.0
+# Nexus-FCA v2.1.5
+
+<!-- 2.1.5 Highlights (PendingEdits & ACK Metrics) -->
+> New in 2.1.5: PendingEdits buffer (cap + TTL + safe resend), edit ACK watchdog, p95 ACK latency & edit resend/failure metrics, configurable via `api.setEditOptions()`.
 
 <p align="center">
   <!-- Preview image wrapped in link (corrected ibb.co domain) -->

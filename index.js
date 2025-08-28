@@ -237,8 +237,19 @@ function buildAPI(globalOptions, html, jar) {
     wsReqNumber: 0,
     wsTaskNumber: 0,
     // Provide safety module reference to lower layers (listenMqtt)
-    globalSafety
+    globalSafety,
+    // Pending edit tracking (Stage 2)
+    pendingEdits: new Map()
   };
+  // Default edit / resend safety settings
+  if(!globalOptions.editSettings){
+    globalOptions.editSettings = {
+      maxPendingEdits: 200,
+      editTTLms: 5*60*1000,
+      ackTimeoutMs: 12000,
+      maxResendAttempts: 2
+    };
+  }
   const api = {
     setOptions: setOptions.bind(null, globalOptions),
     getAppState: function getAppState() {
@@ -251,14 +262,18 @@ function buildAPI(globalOptions, html, jar) {
       );
     },
     healthCheck: function(callback) {
-      // Simple health check: returns status and safeMode info
       callback(null, {
         status: 'ok',
         safeMode,
         time: new Date().toISOString(),
-        userID: ctx.userID || null
+        userID: ctx.userID || null,
+        metrics: ctx.health ? ctx.health.snapshot() : null
       });
     },
+    getHealthMetrics: function(){ return ctx.health ? ctx.health.snapshot() : null; },
+    enableLazyPreflight(enable=true){ ctx.globalOptions.disablePreflight = !enable; },
+    setBackoffOptions(opts={}){ ctx.globalOptions.backoff = Object.assign(ctx.globalOptions.backoff||{}, opts); },
+    setEditOptions(opts={}){ Object.assign(ctx.globalOptions.editSettings, opts); }
   };
   const defaultFuncs = utils.makeDefaults(html, i_userID || userID, ctx);
   require("fs")
