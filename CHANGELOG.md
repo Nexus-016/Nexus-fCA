@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.1.6] - 2025-08-31 - Memory Guard & Queue Sweeping
+### Added
+- Central lightweight memory guard sweeps: group queue pruning (idle >30m, overflow trim) and pendingEdits TTL sweeper (every 4m).
+- Health metrics extended: memoryGuardRuns, memoryGuardActions, groupQueueDroppedMessages, groupQueueExpiredQueues, groupQueuePrunedThreads, pendingEditSweeps.
+- API: `api.getMemoryMetrics()` returns focused memory-related counters.
+- Typings updated (`EditOptions`, new API methods) in `index.d.ts`.
+
+### Improved
+- Group queue now tracks `lastActive` and enforces idle purge + overflow protection with metrics.
+- Pending edits TTL enforcement separated from resend watchdog for deterministic expiry.
+
+### Notes
+- All guards are low-frequency, low-impact; no change to delivery reliability or safety – only prevention of unbounded growth.
+
+---
+
 ## [2.1.5] - 2025-08-28 - PendingEdits & ACK Metrics
 ### Added
 - PendingEdits buffer with cap (default 200) + TTL (5m) + resend attempts (2) + ACK timeout (12s).

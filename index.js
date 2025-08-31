@@ -273,7 +273,20 @@ function buildAPI(globalOptions, html, jar) {
     getHealthMetrics: function(){ return ctx.health ? ctx.health.snapshot() : null; },
     enableLazyPreflight(enable=true){ ctx.globalOptions.disablePreflight = !enable; },
     setBackoffOptions(opts={}){ ctx.globalOptions.backoff = Object.assign(ctx.globalOptions.backoff||{}, opts); },
-    setEditOptions(opts={}){ Object.assign(ctx.globalOptions.editSettings, opts); }
+    setEditOptions(opts={}){ Object.assign(ctx.globalOptions.editSettings, opts); },
+    getMemoryMetrics(){
+      if(!ctx.health) return null;
+      const snap = ctx.health.snapshot();
+      return {
+        pendingEdits: snap.pendingEdits,
+        pendingEditsDropped: snap.pendingEditsDropped,
+        pendingEditsExpired: snap.pendingEditsExpired,
+        outboundQueueDepth: snap.outboundQueueDepth,
+        groupQueueDroppedMessages: snap.groupQueueDroppedMessages,
+        memoryGuardRuns: snap.memoryGuardRuns,
+        memoryGuardActions: snap.memoryGuardActions
+      };
+    }
   };
   const defaultFuncs = utils.makeDefaults(html, i_userID || userID, ctx);
   require("fs")
@@ -315,7 +328,7 @@ function buildAPI(globalOptions, html, jar) {
   }, 1000 * 60 * 60 * 24);
   // === Group Queue (No Cooldown, Sequential per group) ===
   (function initGroupQueue(){
-    const groupQueues = new Map(); // threadID -> { q: [], sending: false }
+    const groupQueues = new Map(); // threadID -> { q: [], sending: false, lastActive: number }
     const isGroupThread = (tid) => typeof tid === 'string' && tid.length >= 15; // simple heuristic
     const DIRECT_FN = api.sendMessage; // original
 
@@ -325,6 +338,8 @@ function buildAPI(globalOptions, html, jar) {
     api.setGroupQueueCapacity = function(n){ globalOptions.groupQueueMax = n; };
     api.enableGroupQueue(true);
     api.setGroupQueueCapacity(100); // allow up to 100 pending per group
+    // New: group queue retention policy
+    globalOptions.groupQueueIdleMs = 30*60*1000; // 30m idle purge
 
     api._sendMessageDirect = DIRECT_FN;
     api.sendMessage = function(message, threadID, cb){
@@ -332,10 +347,12 @@ function buildAPI(globalOptions, html, jar) {
         return api._sendMessageDirect(message, threadID, cb);
       }
       let entry = groupQueues.get(threadID);
-      if(!entry){ entry = { q: [], sending: false }; groupQueues.set(threadID, entry); }
+      if(!entry){ entry = { q: [], sending: false, lastActive: Date.now() }; groupQueues.set(threadID, entry); }
+      entry.lastActive = Date.now();
       if(entry.q.length >= (globalOptions.groupQueueMax||100)) {
         // drop oldest (keep newest) to avoid unbounded growth
         entry.q.shift();
+        if(ctx.health) ctx.health.recordGroupQueuePrune(0,0,1);
       }
       entry.q.push({ message, threadID, cb });
       processQueue(threadID, entry);
@@ -364,6 +381,33 @@ function buildAPI(globalOptions, html, jar) {
       }
       entry.sending = false;
     };
+
+    // Memory guard sweeper (lightweight)
+    if(!globalOptions._groupQueueSweeper){
+      globalOptions._groupQueueSweeper = setInterval(()=>{
+        const now = Date.now();
+        let prunedThreads = 0; let expiredQueues = 0; let dropped = 0; let actions = 0;
+        for(const [tid, entry] of groupQueues.entries()){
+          // Idle purge
+            if(now - entry.lastActive > (globalOptions.groupQueueIdleMs||1800000) && !entry.sending){
+              if(entry.q.length){ dropped += entry.q.length; }
+              groupQueues.delete(tid); expiredQueues++; actions++;
+              continue;
+            }
+          // Hard cap queue length (just in case capacity changed lower)
+          const cap = globalOptions.groupQueueMax||100;
+          if(entry.q.length > cap){
+            const overflow = entry.q.length - cap;
+            entry.q.splice(0, overflow); // drop oldest overflow
+            dropped += overflow; actions++;
+          }
+        }
+        if((prunedThreads||expiredQueues||dropped) && ctx.health){
+          ctx.health.recordGroupQueuePrune(prunedThreads, expiredQueues, dropped);
+          ctx.health.recordMemoryGuardRun(actions);
+        }
+      }, 5*60*1000); // every 5 minutes
+    }
   })();
   // === End Group Queue ===
   return {
