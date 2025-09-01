@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.1.7] - 2025-09-01 - Session Stability Patch
+### Added
+- User-Agent continuity (anchored single UA for entire session via safety module; eliminates mid-session UA drift increasing 20–22h expiry risk).
+- Exposed `setFixedUserAgent()` in `FacebookSafety` to allow explicit anchoring from credential phase.
+- Mid-session lightweight token poke (6h ±40m) to keep session warm without full heavy refresh cycle.
+
+### Changed
+- Removed legacy mobile agent override fallback in `loginHelper` that caused mixed UA fingerprints.
+- All safe requests now inherit continuity-aware UA through `applySafeRequestOptions`.
+
+### Improved
+- Extended resilience against 20–22h cookie invalidation observed with prior dual-phase UA pattern.
+- Reduced unnecessary full refresh churn while preserving stealth (`safeRefresh` + light poke coexist).
+
+---
+
 ## [2.1.6] - 2025-08-31 - Memory Guard & Queue Sweeping
 ### Added
 - Central lightweight memory guard sweeps: group queue pruning (idle >30m, overflow trim) and pendingEdits TTL sweeper (every 4m).

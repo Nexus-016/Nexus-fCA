@@ -1,32 +1,74 @@
-# Nexus-FCA v2.1.5
+# Nexus-FCA v2.1.7
 
-<!-- 2.1.5 Highlights (PendingEdits & ACK Metrics) -->
-> New in 2.1.5: PendingEdits buffer (cap + TTL + safe resend), edit ACK watchdog, p95 ACK latency & edit resend/failure metrics, configurable via `api.setEditOptions()`.
+<!-- 2.1.7 Session Stability Patch -->
+> New in 2.1.7: Session Stability Patch – anchored User-Agent continuity (eliminates 20–22h silent expiry pattern), lightweight mid‑session token poke (6h ±40m) + existing adaptive safeRefresh, retains ultra‑low ban profile.
+
+<!-- 2.1.6 Memory Guard -->
+> 2.1.6: Memory Guard & Queue Sweeping – bounded group queues, pending edit TTL sweeper, memory metrics exporter.
+
+<!-- 2.1.5 PendingEdits -->
+> 2.1.5: PendingEdits buffer (cap + TTL + safe resend), edit ACK watchdog, p95 ACK latency & edit resend/failure metrics, configurable via `api.setEditOptions()`.
 
 <p align="center">
   <!-- Preview image wrapped in link (corrected ibb.co domain) -->
   <a href="https://ibb.co/8ymR1tw"><img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA Dragon Fruit" width="520" border="0" /></a>
 </p>
 
-> Advanced, safe, modern Facebook Chat (Messenger) API with integrated secure login (ID / Password / 2FA), ultra‑low ban rate session management, MQTT listener, and TypeScript-ready developer experience.
+> Advanced, safe, modern Facebook Chat (Messenger) API with integrated secure login (ID / Password / 2FA), ultra‑low ban rate session management, adaptive MQTT resilience, memory guard, and TypeScript-ready developer experience.
 
 ---
-## ✨ Highlights
+## ✨ Highlights (Core Pillars)
 - 🔐 Integrated secure login system (username/password + TOTP 2FA) → auto appstate
-- 🛡️ Ultra-low ban rate design (human timing, safety limiter, risk heuristics)
-- 🔄 Resilient MQTT listener (improved session validation + graceful reconnect)
-- 🔁 Persistent device fingerprint (no random rotation → fewer checkpoints)
-- 🧠 Smart session validation (multi-endpoint retry, reduced false logouts)
-- ⚙️ Zero-config appstate reuse & automatic backup/versioned snapshots
-- 🧩 Modular architecture (safety, performance, error, mqtt managers)
-- 🗂️ Rich feature docs in `/docs` (thread, message, reactions, attachments)
+- 🛡️ Ultra-low ban rate design (human timing, safety limiter, anchored UA, risk heuristics)
+- 🔄 Resilient MQTT listener (adaptive backoff + idle / ghost detection + periodic recycle)
+- ♻️ Session continuity: anchored UA + adaptive safe refresh + lightweight mid-session poke
+- 🧠 Smart session validation (lazy preflight, multi-endpoint retry, reduced false logouts)
+- 📊 Live health & memory metrics (`api.getHealthMetrics()`, `api.getMemoryMetrics()`)
 - 🧾 Type definitions (`index.d.ts`) & modern Promise / callback API
+- 🧩 Modular architecture (safety, performance, error, mqtt managers)
 
 ---
-## 🚀 Install
-```bash
-npm install nexus-fca
+## 🚀 Recent Stability Enhancements (2.1.7 / 2.1.6 / 2.1.5)
+| Version | Focus | Key Additions |
+|---------|-------|---------------|
+| 2.1.7 | Session Longevity | UA continuity anchor, lightweight token poke, removal of mid-login UA drift |
+| 2.1.6 | Memory Safety | Group queue idle purge + overflow trim, pendingEdits TTL sweeper, memory guard metrics |
+| 2.1.5 | Edit Reliability | PendingEdits buffer (cap+TTL), ACK watchdog, resend limits, p95 ACK latency |
+
+### Why UA Continuity Matters
+Previously, dual-phase login could swap user agents (mobile → desktop) causing server-side heuristic expiry near 20–22h. Anchoring a single UA eliminates the inconsistent device fingerprint pattern and extends stable runtime under identical safety posture.
+
+### Lightweight Mid-Session Poke
+A subtle `fb_dtsg` refresh every ~6h ±40m (in addition to adaptive risk-based safeRefresh) keeps tokens warm without aggressive churn, lowering validation friction while avoiding noisy traffic patterns.
+
+---
+## 🧪 Key API Additions
+```js
+api.setEditOptions({ maxPendingEdits, editTTLms, ackTimeoutMs, maxResendAttempts });
+api.setBackoffOptions({ base, factor, max, jitter });
+api.enableLazyPreflight(true); // Skip heavy validation if a recent good connect exists
+api.getHealthMetrics(); // uptime, reconnect stats, ack latency, synthetic keepalives
+api.getMemoryMetrics(); // queue depths, drops, guard run counters
 ```
+
+---
+## 🔍 Monitoring Example
+```js
+setInterval(() => {
+  const h = api.getHealthMetrics();
+  const m = api.getMemoryMetrics();
+  console.log('[HEALTH]', h?.status, 'acks', h?.ackCount, 'p95Ack', h?.p95AckLatencyMs);
+  console.log('[MEM]', m);
+}, 60000);
+```
+
+---
+## 🧷 Long Session Best Practices
+1. Use appstate login when possible (avoid frequent credential logins).
+2. Keep `persistent-device.json` – do not rotate unless forced.
+3. Avoid changing UA manually; continuity is automatic post‑2.1.7.
+4. Inspect health metrics before manually forcing reconnects.
+5. Let adaptive backoff handle transient network instability.
 
 ---
 ## ⚡ Quick Start (Appstate)
@@ -61,14 +103,17 @@ const login = require('nexus-fca');
 ```
 
 ---
-## 🛡️ Safety Layer (v2.1.0 Improvements)
+## 🛡️ Safety Layer (Updated)
 | Feature | Benefit |
 |---------|---------|
-| Persistent device profile | Prevents repeated “new device” flags & locks |
-| Smarter session preflight | Eliminates noisy false `not_logged_in` errors |
-| Redirect & HTML detection | Accurate login checkpoint identification |
-| Controlled retries (5xx)  | Backoff without hammering endpoints |
-| Human-like delays          | Reduces automated pattern detection |
+| Anchored User-Agent | Eliminates fingerprint drift (prevents 20–22h expiry) |
+| Adaptive Safe Refresh | Risk‑sensitive token renewal bands |
+| Lightweight Token Poke | Quiet longevity without churn |
+| Idle / Ghost Detection | Auto probe + reconnect on silent stalls |
+| Periodic Recycle | 6h ± jitter connection rejuvenation |
+| Persistent Device Profile | Fewer checkpoints / trust continuity |
+| Lazy Preflight | Skips heavy validation when recently healthy |
+| Human-like Timing | Reduces automation signal surface |
 
 Disable preflight if needed:
 ```js
@@ -77,13 +122,14 @@ await login({ appState }, { disablePreflight: true });
 
 ---
 ## 🛰️ MQTT Listener Enhancements
-- Preflight now async & tolerant (second-stage check only logs failure)
-- Classified errors: `login_redirect`, `html_login_page`, `not_logged_in`
-- Automatic cookie/token refresh propagation
+- Adaptive exponential backoff with jitter (caps 5m)
+- Soft-stale probing (2m30s) + hard watchdog tiers
+- Layered post-refresh health checks (1s / 10s / 30s) after token renewal
+- Synthetic keepalives (randomized 55–75s) feeding metrics
 
 ---
 ## 📦 Example Echo Test
-`examples/echo-test.js` (already included):
+`examples/echo-test.js`:
 ```bash
 node examples/echo-test.js
 ```
@@ -91,9 +137,9 @@ Provide `appstate.json` or set `EMAIL` / `PASSWORD` env variables.
 
 ---
 ## 🧠 Advanced Login Flow
-1. New integrated system safely generates / refreshes cookies (if credentials supplied)
-2. Legacy core consumes resulting appstate for stable API behavior
-3. Optional persistent device JSON: `persistent-device.json`
+1. Integrated system safely generates / refreshes cookies (if credentials supplied)
+2. Core consumes resulting appstate for stable API behavior
+3. Persistent device JSON: `persistent-device.json`
 
 Persistent device toggle:
 ```js
@@ -174,15 +220,16 @@ const login = require('nexus-fca');
 - Examples: `/examples`
 
 ---
-## 🔁 Updating from 2.0.x → 2.1.0
+## 🔁 Updating from 2.0.x → 2.1.x
 | Change | Action |
 |--------|--------|
-| Preflight errors | Noise reduced automatically |
-| Device rotation | Now persistent by default | 
-| parseAndCheckLogin | Handles 3xx & HTML login responses |
-| Session validation | New `validateSession` helper |
+| UA Continuity (2.1.7) | No action; auto applied |
+| Memory Guard (2.1.6) | Inspect `api.getMemoryMetrics()` periodically |
+| PendingEdits (2.1.5) | Tune via `api.setEditOptions()` if needed |
+| Lazy Preflight | Optionally disable when embedding in other frameworks |
+| Persistent Device | Keep file unless forced reset required |
 
-No breaking API changes.
+No breaking API changes across 2.1.x line.
 
 ---
 ## ⚠️ Disclaimer

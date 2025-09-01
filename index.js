@@ -428,7 +428,8 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
     return callback(new Error(`Login Safety Check Failed: ${safetyCheck.reason}`));
   }
   
-  // Apply safe user agent from safety module
+  // Establish continuity user agent ONCE (credential/appstate phase)
+  if(!globalSafety._fixedUA){ globalSafety.setFixedUserAgent(globalSafety.getSafeUserAgent()); }
   globalOptions.userAgent = globalSafety.getSafeUserAgent();
   
   if (appState) {
@@ -448,7 +449,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
         jar.setCookie(str, "http://" + c.domain);
       });
 
-      // Apply safety headers and no delays for maximum safety
+      // Apply safety headers with continuity UA
       mainPromise = utils.get('https://www.facebook.com/', jar, null, 
         globalSafety.applySafeRequestOptions(globalOptions), { noRef: true })
         .then(utils.saveCookies(jar));
@@ -463,7 +464,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
     const reg = /<meta http-equiv="refresh" content="0;url=([^"]+)[^>]+>/;
     const redirect = reg.exec(res.body);
     if (redirect && redirect[1]) {
-      return utils.get(redirect[1], jar, null, globalOptions).then(utils.saveCookies(jar));
+      return utils.get(redirect[1], jar, null, globalSafety.applySafeRequestOptions(globalOptions)).then(utils.saveCookies(jar));
     }
     return res;
   }
@@ -472,11 +473,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
   mainPromise = mainPromise
     .then(handleRedirect)
     .then(res => {
-      const mobileAgentRegex = /MPageLoadClientMetrics/gs;
-      if (!mobileAgentRegex.test(res.body)) {
-        globalOptions.userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
-        return utils.get('https://www.facebook.com/', jar, null, globalOptions, { noRef: true }).then(utils.saveCookies(jar));
-      }
+      // Remove UA override logic to maintain continuity (previous mobileAgentRegex swap)
       return res;
     })
     .then(handleRedirect)
@@ -508,6 +505,22 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       logger('✅ Session authenticated successfully', 'info');
       // Initialize safety monitoring
       globalSafety.startMonitoring(ctx, api);
+      // Schedule mid-session lightweight token poke (~ every 6h ±40m) to keep cookies warm
+      if(!globalOptions._lightRefreshTimer){
+        const scheduleLight = () => {
+          const base = 6 * 60 * 60 * 1000; // 6h
+          const jitter = (Math.random()*80 - 40) * 60 * 1000; // ±40m
+            globalOptions._lightRefreshTimer = setTimeout(async () => {
+              try {
+                if(api && typeof api.refreshFb_dtsg === 'function'){
+                  await api.refreshFb_dtsg().catch(()=>{});
+                }
+              } catch(_) {}
+              scheduleLight();
+            }, base + jitter);
+        };
+        scheduleLight();
+      }
       // Post-login identity banner
       try {
         const uid = api.getCurrentUserID && api.getCurrentUserID();
