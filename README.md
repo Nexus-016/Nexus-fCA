@@ -1,7 +1,7 @@
 # Nexus-FCA v2.1.7
 
 <!-- 2.1.7 Session Stability Patch -->
-> New in 2.1.7: Session Stability Patch – anchored User-Agent continuity (eliminates 20–22h silent expiry pattern), lightweight mid‑session token poke (6h ±40m) + existing adaptive safeRefresh, retains ultra‑low ban profile.
+> New in 2.1.7: Session Stability Patch – anchored User-Agent continuity (eliminates 20–22h silent expiry pattern), lightweight mid‑session token poke (6–7h randomized) + existing adaptive safeRefresh, retains ultra‑low ban profile.
 
 <!-- 2.1.6 Memory Guard -->
 > 2.1.6: Memory Guard & Queue Sweeping – bounded group queues, pending edit TTL sweeper, memory metrics exporter.
@@ -39,7 +39,7 @@
 Previously, dual-phase login could swap user agents (mobile → desktop) causing server-side heuristic expiry near 20–22h. Anchoring a single UA eliminates the inconsistent device fingerprint pattern and extends stable runtime under identical safety posture.
 
 ### Lightweight Mid-Session Poke
-A subtle `fb_dtsg` refresh every ~6h ±40m (in addition to adaptive risk-based safeRefresh) keeps tokens warm without aggressive churn, lowering validation friction while avoiding noisy traffic patterns.
+A subtle `fb_dtsg` refresh every ~6–7h (in addition to adaptive risk-based safeRefresh) keeps tokens warm without aggressive churn, lowering validation friction while avoiding noisy traffic patterns.
 
 ---
 ## 🧪 Key API Additions
@@ -110,7 +110,7 @@ const login = require('nexus-fca');
 | Adaptive Safe Refresh | Risk‑sensitive token renewal bands |
 | Lightweight Token Poke | Quiet longevity without churn |
 | Idle / Ghost Detection | Auto probe + reconnect on silent stalls |
-| Periodic Recycle | 6h ± jitter connection rejuvenation |
+| Periodic Recycle | 6–7h randomized connection rejuvenation |
 | Persistent Device Profile | Fewer checkpoints / trust continuity |
 | Lazy Preflight | Skips heavy validation when recently healthy |
 | Human-like Timing | Reduces automation signal surface |

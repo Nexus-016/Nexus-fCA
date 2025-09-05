@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.9] - 2025-09-05 - Mid-session poke window adjusted to 6–7h
+### Changed
+ - Mid-session lightweight fb_dtsg poke window adjusted to ~6–7h to better align with periodic recycle timing and further reduce detectable refresh patterns.
+
+### Notes
+- This is a minor timing change only; no functional behavior or API changes.
+
+---
+
 ## [2.1.8] - 2025-09-02 - Extended Safe Refresh Window
 ### Changed
 - Safe session refresh interval widened to 3–5h (adaptive: 1–1.5h when risk=high) to reduce token churn and mitigate premature cookie expiry heuristics.
@@ -9,7 +18,7 @@
 - Longer, randomized window maintains stealth while heartbeats, ghost detection, and adaptive reconnect still ensure liveness.
 
 ### Notes
-- Lightweight mid‑session fb_dtsg poke (≈6h ±40m) retained; heavy refresh cadence now sparser.
+- Lightweight mid‑session fb_dtsg poke (≈6–7h) retained; heavy refresh cadence now sparser.
 
 ---
 
@@ -17,7 +26,7 @@
 ### Added
 - User-Agent continuity (anchored single UA for entire session via safety module; eliminates mid-session UA drift increasing 20–22h expiry risk).
 - Exposed `setFixedUserAgent()` in `FacebookSafety` to allow explicit anchoring from credential phase.
-- Mid-session lightweight token poke (6h ±40m) to keep session warm without full heavy refresh cycle.
+ - Mid-session lightweight token poke (≈6–7h) to keep session warm without full heavy refresh cycle.
 
 ### Changed
 - Removed legacy mobile agent override fallback in `loginHelper` that caused mixed UA fingerprints.
@@ -86,7 +95,7 @@
 - Soft-stale probing at 2 minutes idle (ping + conditional forced reconnect if no events within 5-8s)
 - Wrapper around `listenMqtt` to automatically feed events into safety heartbeat (`recordEvent`) for precise idle detection
 - Ghost connection detection (10m silent but socket connected triggers forced reconnect after probe)
-- Periodic connection recycle every ~6h ±30m to prevent long-lived silent degradation
+ - Periodic connection recycle every ~6–7h randomized to prevent long-lived silent degradation
 - Force reconnect API: `globalSafety.forceReconnect(tag)`
 
 ### Improved
