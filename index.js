@@ -505,22 +505,21 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       logger('✅ Session authenticated successfully', 'info');
       // Initialize safety monitoring
       globalSafety.startMonitoring(ctx, api);
-  // Schedule mid-session lightweight token poke (~ every 6h ±40m) to keep cookies warm
-        if(!globalOptions._lightRefreshTimer){
-          const scheduleLight = () => {
-            const base = 6 * 60 * 60 * 1000; // 6h
-              // jitter ±40m
-              const jitter = (Math.random()*80 - 40) * 60 * 1000; // ±40m
-              globalOptions._lightRefreshTimer = setTimeout(async () => {
-                try {
-                  if(api && typeof api.refreshFb_dtsg === 'function'){
-                    await api.refreshFb_dtsg().catch(()=>{});
-                  }
-                } catch(_) {}
-                scheduleLight();
-              }, base + jitter);
-          };
-          scheduleLight();
+      // Schedule mid-session lightweight token poke (~ every 6h ±40m) to keep cookies warm
+      if(!globalOptions._lightRefreshTimer){
+        const scheduleLight = () => {
+          const base = 6 * 60 * 60 * 1000; // 6h
+          const jitter = (Math.random()*80 - 40) * 60 * 1000; // ±40m
+            globalOptions._lightRefreshTimer = setTimeout(async () => {
+              try {
+                if(api && typeof api.refreshFb_dtsg === 'function'){
+                  await api.refreshFb_dtsg().catch(()=>{});
+                }
+              } catch(_) {}
+              scheduleLight();
+            }, base + jitter);
+        };
+        scheduleLight();
       }
       // Post-login identity banner
       try {
