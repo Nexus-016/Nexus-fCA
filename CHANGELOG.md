@@ -1,31 +1,10 @@
 # Changelog
 
-## [2.1.8] - 2025-09-02 - Extended Safe Refresh Window
-### Changed
- - Safe session refresh interval widened to 3–5h (adaptive: 1–1.5h when risk=high) to reduce token churn and mitigate premature cookie expiry heuristics.
-
-### Notes
-- Lightweight mid‑session fb_dtsg poke (≈6h ±40m) retained; heavy refresh cadence now sparser.
-
----
-
-### Changed
-- Safe session refresh interval widened to 3–5h (adaptive: 1–1.5h when risk=high) to reduce token churn and mitigate premature cookie expiry heuristics.
-
-### Rationale
-- Frequent refreshes can accelerate cookie rotation patterns → earlier invalidation.
-- Longer, randomized window maintains stealth while heartbeats, ghost detection, and adaptive reconnect still ensure liveness.
-
-### Notes
-- Lightweight mid‑session fb_dtsg poke (≈6h ±40m) retained; heavy refresh cadence now sparser.
-
----
-
 ## [2.1.7] - 2025-09-01 - Session Stability Patch
 ### Added
 - User-Agent continuity (anchored single UA for entire session via safety module; eliminates mid-session UA drift increasing 20–22h expiry risk).
 - Exposed `setFixedUserAgent()` in `FacebookSafety` to allow explicit anchoring from credential phase.
- - Mid-session lightweight token poke (≈6h ±40m) to keep session warm without full heavy refresh cycle.
+- Mid-session lightweight token poke (6h ±40m) to keep session warm without full heavy refresh cycle.
 
 ### Changed
 - Removed legacy mobile agent override fallback in `loginHelper` that caused mixed UA fingerprints.
@@ -94,7 +73,7 @@
 - Soft-stale probing at 2 minutes idle (ping + conditional forced reconnect if no events within 5-8s)
 - Wrapper around `listenMqtt` to automatically feed events into safety heartbeat (`recordEvent`) for precise idle detection
 - Ghost connection detection (10m silent but socket connected triggers forced reconnect after probe)
- - Periodic connection recycle every ~6h (±30m) randomized to prevent long-lived silent degradation
+- Periodic connection recycle every ~6h ±30m to prevent long-lived silent degradation
 - Force reconnect API: `globalSafety.forceReconnect(tag)`
 
 ### Improved
