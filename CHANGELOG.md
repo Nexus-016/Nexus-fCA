@@ -1,5 +1,43 @@
 # Changelog
 
+## [2.1.9] - 2025-09-08 - Advanced Stability Prep
+### Added
+- Dynamic risk-tier tuning: heartbeat interval, backoff delay, spacing guard adjust automatically on risk changes.
+- Adaptive outbound pacing: micro-delays after heavy maintenance (refresh/reconnect) to reduce burst patterns (2m adaptive window).
+
+### Changed
+- Reconnect backoff now computed via risk-aware curve (faster recovery in high risk, quieter in low risk).
+
+### Notes
+- Optional, transparent; no API break. Can expose stats later via planned getSafetyTimingStats.
+
+---
+
+## [2.1.8] - 2025-09-08 - Safety Consolidation & Collision Guard
+### Added
+- Unified safety orchestrator (single module coordinates safe refresh, light poke, periodic recycle) with timer registry and structured teardown.
+- Collision spacing guard (45m) preventing clustered token operations (refresh/poke/recycle).
+- Recycle suppression logic (defers 20–30m if a refresh/poke occurred inside spacing window).
+- Light poke integration moved inside `FacebookSafety.scheduleLightPoke()` (duplicate inline scheduling removed).
+- Deprecation warning emitted when legacy `FacebookSafetyManager` is instantiated.
+
+### Changed
+- Removed duplicate mid-session poke timer from `index.js`.
+- Safe refresh participates in collision guard and spacing tracking (`_lastRefreshTs`).
+- Periodic recycle respects `_minSpacingMs` and defers if necessary.
+
+### Improved
+- Lower probability of rapid successive token / connection maintenance clustering.
+- Simplified lifecycle cleanup through timer registry.
+
+### Deprecated
+- `FacebookSafetyManager` (legacy) – retained for backward compatibility only.
+
+### Notes
+- No public API break; users should remove custom light poke timers.
+
+---
+
 ## [2.1.7] - 2025-09-01 - Session Stability Patch
 ### Added
 - User-Agent continuity (anchored single UA for entire session via safety module; eliminates mid-session UA drift increasing 20–22h expiry risk).
@@ -118,7 +156,6 @@ Stability-focused release improving long‑running bot sessions, reducing false 
 ### Changed
 - 🔁 `listenMqtt` now performs silent initial validation; only emits `not_logged_in` after a confirmatory retry
 - 🧠 `parseAndCheckLogin` now robustly handles 3xx chains & HTML login fallback pages
-- 🔐 Default behavior: device identity no longer rotates unless explicitly overridden
 - 🧩 Refactored internal cookie & session utilities (centralized in `utils.js`)
 - 📄 Rewritten documentation (README, DOCS, CHANGELOG) for concise modern onboarding
 

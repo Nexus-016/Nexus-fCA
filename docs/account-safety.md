@@ -11,6 +11,8 @@ Nexus-FCA Ultra-Safe Edition is designed to minimize Facebook account ban, lock,
 - **Proactive Safety Alerts:** If a risk is detected (lock, checkpoint, block), the bot will pause or stop to prevent further issues
 - **Session & Token Management:** Automatic session validation and safe token refresh keep your login secure
 - **Region & Connection Protection:** Advanced region bypass and safe reconnection logic avoid suspicious activity triggers
+- **Unified Safety Orchestrator (2.1.8+):** Single scheduler coordinates safe refresh, light poke (~6h ±40m), and periodic recycle (~6h ±30m) with collision spacing (45m) to prevent clustered token actions
+- **Ghost / Idle Detection:** Soft-stale probing (2m30s) and ghost recovery before full disconnect patterns emerge
 
 ---
 
@@ -24,6 +26,7 @@ Nexus-FCA Ultra-Safe Edition is designed to minimize Facebook account ban, lock,
   - Always use cookies less than 7 days old for best results
 - **Monitor Risk Level:**
   - Listen for `riskLevelHigh`, `accountLocked`, `checkpointRequired` events and take action if triggered
+- **Avoid Deprecated Manager:** Do not instantiate `FacebookSafetyManager` (legacy); consolidated `FacebookSafety` handles everything automatically.
 
 ---
 
@@ -34,6 +37,8 @@ Nexus-FCA Ultra-Safe Edition is designed to minimize Facebook account ban, lock,
 - **Update your appstate.json regularly**
 - **Monitor your Facebook account for security notifications**
 - **If you see a checkpoint or lock, stop the bot and verify your account manually**
+- **Do not schedule custom token poke timers; built‑in orchestrator already manages safe refresh cadence & spacing**
+- **Keep `persistent-device.json` stable—don’t delete unless forced by actual session invalidation**
 
 ---
 
@@ -55,6 +60,13 @@ client.login({ appState: require('./appstate.json') });
 - `checkpointRequired` — Facebook requires manual verification
 - `riskLevelHigh` — High risk detected, bot will increase delays and reduce activity
 - `sessionExpired` — Session expired, update your appstate.json
+- `safeRefresh` — Safe token refresh attempted (payload includes success/failure, duration)
+- `lightPoke` — Lightweight fb_dtsg keep-alive executed
+- `mqttReconnect` — Reconnect cycle triggered (reason + attempt)
+- `heartbeat` — Periodic keepalive ping succeeded
+
+### Event Spacing (2.1.8+)
+The orchestrator enforces a minimum spacing window (~45m) between maintenance actions (refresh, recycle, light poke). If a recycle is scheduled too soon after a refresh/poke it defers 20–30m automatically to avoid clustering patterns.
 
 ---
 
@@ -66,7 +78,16 @@ client.login({ appState: require('./appstate.json') });
 > Stop the bot immediately, log in to Facebook manually, and follow the verification steps. Only restart the bot after your account is fully restored.
 
 **Q: How often should I update my appstate.json?**
-> At least once a week, or whenever you see a session expired or checkpoint event.
+> At least once a week, or whenever you see a session expired or checkpoint event (less often if persistent device + long stable runs).
+
+**Q: How often are tokens refreshed now?**
+> Adaptive. Low risk uses multi‑hour windows; high risk shortens interval. Lightweight mid-session poke (~6h ±40m) and periodic recycle (~6h ±30m) are collision‑guarded with 45m spacing.
+
+**Q: Do I need to keep my own refresh timers?**
+> No. Remove custom refresh/poke loops—duplication increases clustering risk.
+
+**Q: Is legacy `FacebookSafetyManager` still required?**
+> No. It is deprecated and only logs a warning if used. Migrate entirely to the integrated safety layer (automatic on login).
 
 ---
 

@@ -296,6 +296,15 @@ function buildAPI(globalOptions, html, jar) {
       api[v.replace(".js", "")] = require("./src/" + v)(defaultFuncs, api, ctx);
     });
   api.listen = api.listenMqtt;
+  // Adaptive outbound pacing wrapper (dynamic risk + post-maintenance window)
+  if (!api._adaptivePacingWrapped && typeof api.sendMessage === 'function') {
+    const _origSend = api.sendMessage;
+    api.sendMessage = async function(message, threadID, callback){
+      try { if (globalSafety && typeof globalSafety.applyAdaptiveSendDelay === 'function') await globalSafety.applyAdaptiveSendDelay(); } catch(_) {}
+      return _origSend(message, threadID, callback);
+    };
+    api._adaptivePacingWrapped = true;
+  }
   // Safety wrapper: ensure every inbound MQTT event updates safety lastEvent timestamp
   if (!api._safetyWrappedListen) {
     const _origListen = api.listenMqtt;
@@ -505,21 +514,10 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       logger('✅ Session authenticated successfully', 'info');
       // Initialize safety monitoring
       globalSafety.startMonitoring(ctx, api);
-      // Schedule mid-session lightweight token poke (~ every 6h ±40m) to keep cookies warm
-      if(!globalOptions._lightRefreshTimer){
-        const scheduleLight = () => {
-          const base = 6 * 60 * 60 * 1000; // 6h
-          const jitter = (Math.random()*80 - 40) * 60 * 1000; // ±40m
-            globalOptions._lightRefreshTimer = setTimeout(async () => {
-              try {
-                if(api && typeof api.refreshFb_dtsg === 'function'){
-                  await api.refreshFb_dtsg().catch(()=>{});
-                }
-              } catch(_) {}
-              scheduleLight();
-            }, base + jitter);
-        };
-        scheduleLight();
+  try { globalSafety.startDynamicSystems(); } catch(_) {}
+      // Consolidated: delegate light poke to unified safety module (prevents duplicate refresh scheduling)
+      if (globalSafety && typeof globalSafety.scheduleLightPoke === 'function') {
+        globalSafety.scheduleLightPoke();
       }
       // Post-login identity banner
       try {

@@ -1,7 +1,10 @@
-# Nexus-FCA v2.1.7
+# Nexus-FCA v2.1.9
+
+<!-- 2.1.9 Safety Consolidation -->
+> New in 2.1.9: Safety Consolidation & Collision Guard – unified safety orchestrator (single scheduler for safe refresh, light poke, periodic recycle) + 45m spacing guard (prevents clustered token actions), timer registry cleanup, recycle suppression after recent refresh, deprecates legacy FacebookSafetyManager.
 
 <!-- 2.1.7 Session Stability Patch -->
-> New in 2.1.7: Session Stability Patch – anchored User-Agent continuity (eliminates 20–22h silent expiry pattern), lightweight mid‑session token poke (6h ±40m randomized) + existing adaptive safeRefresh, retains ultra‑low ban profile.
+> 2.1.7: Session Stability Patch – anchored User-Agent continuity (eliminates 20–22h silent expiry pattern), lightweight mid‑session token poke (6h ±40m randomized) + existing adaptive safeRefresh, retains ultra‑low ban profile.
 
 <!-- 2.1.6 Memory Guard -->
 > 2.1.6: Memory Guard & Queue Sweeping – bounded group queues, pending edit TTL sweeper, memory metrics exporter.
@@ -21,16 +24,17 @@
 - 🔐 Integrated secure login system (username/password + TOTP 2FA) → auto appstate
 - 🛡️ Ultra-low ban rate design (human timing, safety limiter, anchored UA, risk heuristics)
 - 🔄 Resilient MQTT listener (adaptive backoff + idle / ghost detection + periodic recycle)
-- ♻️ Session continuity: anchored UA + adaptive safe refresh + lightweight mid-session poke
+- ♻️ Session continuity: anchored UA + adaptive safe refresh + integrated lightweight mid-session poke
 - 🧠 Smart session validation (lazy preflight, multi-endpoint retry, reduced false logouts)
 - 📊 Live health & memory metrics (`api.getHealthMetrics()`, `api.getMemoryMetrics()`)
 - 🧾 Type definitions (`index.d.ts`) & modern Promise / callback API
 - 🧩 Modular architecture (safety, performance, error, mqtt managers)
 
 ---
-## 🚀 Recent Stability Enhancements (2.1.7 / 2.1.6 / 2.1.5)
+## 🚀 Recent Stability Enhancements (2.1.8 / 2.1.7 / 2.1.6 / 2.1.5)
 | Version | Focus | Key Additions |
 |---------|-------|---------------|
+| 2.1.8 | Safety Consolidation | Unified orchestrator, collision spacing (45m), timer registry, recycle suppression, legacy manager deprecated |
 | 2.1.7 | Session Longevity | UA continuity anchor, lightweight token poke, removal of mid-login UA drift |
 | 2.1.6 | Memory Safety | Group queue idle purge + overflow trim, pendingEdits TTL sweeper, memory guard metrics |
 | 2.1.5 | Edit Reliability | PendingEdits buffer (cap+TTL), ACK watchdog, resend limits, p95 ACK latency |
@@ -38,8 +42,8 @@
 ### Why UA Continuity Matters
 Previously, dual-phase login could swap user agents (mobile → desktop) causing server-side heuristic expiry near 20–22h. Anchoring a single UA eliminates the inconsistent device fingerprint pattern and extends stable runtime under identical safety posture.
 
-### Lightweight Mid-Session Poke
-A subtle `fb_dtsg` refresh every ~6h (±40m randomized, in addition to adaptive risk-based safeRefresh) keeps tokens warm without aggressive churn, lowering validation friction while avoiding noisy traffic patterns.
+### Lightweight Mid-Session Poke (Integrated)
+Originally introduced in 2.1.7, now centrally scheduled inside the unified safety orchestrator (no duplicate inline timers). A subtle `fb_dtsg` refresh every ~6h (±40m randomized, alongside adaptive risk-based safe refresh) keeps tokens warm without aggressive churn while avoiding noisy traffic patterns. Collision guard ensures it never triggers too close to a full safe refresh or periodic recycle.
 
 ---
 ## 🧪 Key API Additions
@@ -69,6 +73,7 @@ setInterval(() => {
 3. Avoid changing UA manually; continuity is automatic post‑2.1.7.
 4. Inspect health metrics before manually forcing reconnects.
 5. Let adaptive backoff handle transient network instability.
+6. Avoid using deprecated `FacebookSafetyManager`; the consolidated safety layer activates automatically when `login()` resolves.
 
 ---
 ## ⚡ Quick Start (Appstate)
@@ -103,17 +108,21 @@ const login = require('nexus-fca');
 ```
 
 ---
-## 🛡️ Safety Layer (Updated)
+## 🛡️ Safety Layer (Updated 2.1.8)
 | Feature | Benefit |
 |---------|---------|
 | Anchored User-Agent | Eliminates fingerprint drift (prevents 20–22h expiry) |
-| Adaptive Safe Refresh | Risk‑sensitive token renewal bands |
-| Lightweight Token Poke | Quiet longevity without churn |
+| Unified Orchestrator | Single scheduler for refresh, light poke, recycle (no overlap clashes) |
+| Adaptive Safe Refresh | Risk‑sensitive token renewal bands (multi‑hour low risk, shorter high risk) |
+| Lightweight Token Poke | Quiet longevity without churn (integrated + collision guarded) |
 | Idle / Ghost Detection | Auto probe + reconnect on silent stalls |
-| Periodic Recycle | ~6h (±30m) randomized connection rejuvenation |
+| Periodic Recycle | ~6h (±30m) randomized connection rejuvenation (suppressed if recent refresh) |
 | Persistent Device Profile | Fewer checkpoints / trust continuity |
 | Lazy Preflight | Skips heavy validation when recently healthy |
 | Human-like Timing | Reduces automation signal surface |
+
+### Consolidation / Collision Guard (2.1.8)
+The unified safety module keeps a registry of all scheduled timers (safe refresh, light poke, post-refresh health checks, periodic recycle) and enforces a minimum 45 minute spacing window so heavy or light token actions never cluster. Legacy `FacebookSafetyManager` now only emits a deprecation warning and should not be instantiated going forward.
 
 Disable preflight if needed:
 ```js
@@ -216,7 +225,7 @@ const login = require('nexus-fca');
 ## 📚 Documentation
 - Full API reference: `DOCS.md`
 - Per-feature guides: `/docs/*.md`
-- Safety: `docs/account-safety.md`
+- Safety: `docs/account-safety.md` (unified orchestrator & deprecation note)
 - Examples: `/examples`
 
 ---
@@ -224,6 +233,7 @@ const login = require('nexus-fca');
 | Change | Action |
 |--------|--------|
 | UA Continuity (2.1.7) | No action; auto applied |
+| Safety Consolidation (2.1.8) | Remove any manual timers/light poke code – handled internally |
 | Memory Guard (2.1.6) | Inspect `api.getMemoryMetrics()` periodically |
 | PendingEdits (2.1.5) | Tune via `api.setEditOptions()` if needed |
 | Lazy Preflight | Optionally disable when embedding in other frameworks |
