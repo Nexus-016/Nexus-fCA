@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.10] - 2025-09-08 - Publish Meta Bump
+### Changed
+- Fixed Major Problems found in 2.1.9 and Its the last version of 2.1.xxx
+
+### Notes
+- 2.1.8 And 2.1.10 is the most stable verion!
+
+---
+
 ## [2.1.9] - 2025-09-08 - Advanced Stability Prep
 ### Added
 - Dynamic risk-tier tuning: heartbeat interval, backoff delay, spacing guard adjust automatically on risk changes.

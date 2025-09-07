@@ -1,4 +1,6 @@
-# Nexus-FCA v2.1.9
+# Nexus-FCA v2.1.10
+<!-- 2.1.10 Safety Consolidation -->
+>Fixed Major Problems found in 2.1.9 and Its the last version of 2.1.xxx
 
 <!-- 2.1.9 Safety Consolidation -->
 > New in 2.1.9: Safety Consolidation & Collision Guard – unified safety orchestrator (single scheduler for safe refresh, light poke, periodic recycle) + 45m spacing guard (prevents clustered token actions), timer registry cleanup, recycle suppression after recent refresh, deprecates legacy FacebookSafetyManager.
