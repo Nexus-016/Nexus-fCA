@@ -174,7 +174,10 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   const backoff = getBackoffState(ctx);
   if(!ctx._mqttDiag) ctx._mqttDiag = { attempts:0, events:[] }; 
   ctx._mqttDiag.attempts++;
-  log.info('listenMqtt', `Attempt #${ctx._mqttDiag.attempts} starting (backoffCurrent=${backoff.current||0})`);
+  // Suppress previously noisy test info log (kept only if verbose flag enabled)
+  if (ctx.globalOptions && ctx.globalOptions.verboseMqtt) {
+    log.info('listenMqtt', `Starting Nexus MQTT bridge (attempt=${ctx._mqttDiag.attempts}, backoff=${backoff.current||0}ms)`);
+  }
   const runPreflight = shouldRunPreflight(ctx);
   if (runPreflight) {
     (async () => {
@@ -276,7 +279,9 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     () => buildStream(options, rawWs, buildProxy()),
     options
   );
-  log.info('listenMqtt', `Connecting to ${host}`);
+  if (ctx.globalOptions && ctx.globalOptions.verboseMqtt) {
+    log.info('listenMqtt', `MQTT bridge dialing ${host}`);
+  }
   const mqttClient = ctx.mqttClient;
   global.mqttClient = mqttClient;
   mqttClient.on('error', function (err) {
@@ -308,7 +313,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   mqttClient.on('close', function () {
     ctx.health.onDisconnect();
   if(ctx.health && typeof ctx.health.incFailure === 'function'){ ctx.health.incFailure(); }
-  log.warn('listenMqtt', `Socket closed after ${(Date.now()-attemptStartTs)}ms (attempt #${ctx._mqttDiag.attempts}).`);
+  log.warn('listenMqtt', `MQTT bridge socket closed after ${(Date.now()-attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);
     if (!ctx.loggedIn) return; // avoid loops if logged out
     if (ctx.globalOptions.autoReconnect) {
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
@@ -317,7 +322,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   mqttClient.on('disconnect', function(){
     ctx.health.onDisconnect();
   if(ctx.health && typeof ctx.health.incFailure === 'function'){ ctx.health.incFailure(); }
-  log.warn('listenMqtt', `MQTT disconnect event after ${(Date.now()-attemptStartTs)}ms (attempt #${ctx._mqttDiag.attempts}).`);
+  log.warn('listenMqtt', `MQTT bridge disconnect event after ${(Date.now()-attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);
     if (!ctx.loggedIn) return;
     if (ctx.globalOptions.autoReconnect) {
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
@@ -326,12 +331,11 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   mqttClient.on("connect", function () {
     resetBackoff(backoff);
     ctx.health.onConnect();
-  log.info('listenMqtt', `Connected in ${(Date.now()-attemptStartTs)}ms (attempt #${ctx._mqttDiag.attempts}).`);
+  if (ctx.globalOptions && ctx.globalOptions.verboseMqtt) {
+    log.info('listenMqtt', `Nexus MQTT bridge established in ${(Date.now()-attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);
+  }
     if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch(_) {} }
-    if (process.env.OnStatus === undefined) {
-      logger("Nexus-FCA premium features works only with Nexus-Bot framework(Kidding)", "info");
-      process.env.OnStatus = true;
-    }
+    // Removed test-only premium features banner
     topics.forEach((topicsub) => mqttClient.subscribe(topicsub));
     var topic;
     const queue = {
