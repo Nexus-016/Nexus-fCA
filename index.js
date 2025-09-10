@@ -271,6 +271,7 @@ function buildAPI(globalOptions, html, jar) {
       });
     },
     getHealthMetrics: function(){ return ctx.health ? ctx.health.snapshot() : null; },
+  getMqttDiagnostics: function(){ return ctx.getMqttDiagnostics ? ctx.getMqttDiagnostics() : (ctx._mqttDiag || null); },
     enableLazyPreflight(enable=true){ ctx.globalOptions.disablePreflight = !enable; },
     setBackoffOptions(opts={}){ ctx.globalOptions.backoff = Object.assign(ctx.globalOptions.backoff||{}, opts); },
     setEditOptions(opts={}){ Object.assign(ctx.globalOptions.editSettings, opts); },

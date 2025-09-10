@@ -166,9 +166,15 @@ function buildStream(options, WebSocket, Proxy) {
   return Stream;
 }
 function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
+  const attemptStartTs = Date.now();
   // Attach health metrics container lazily
   if(!ctx.health) ctx.health = new (require('../lib/health/HealthMetrics').HealthMetrics)();
+  // Ensure tasks map exists to track ls_req -> ls_resp correlations (avoid TypeError on undefined)
+  if(!ctx.tasks) ctx.tasks = new Map();
   const backoff = getBackoffState(ctx);
+  if(!ctx._mqttDiag) ctx._mqttDiag = { attempts:0, events:[] }; 
+  ctx._mqttDiag.attempts++;
+  log.info('listenMqtt', `Attempt #${ctx._mqttDiag.attempts} starting (backoffCurrent=${backoff.current||0})`);
   const runPreflight = shouldRunPreflight(ctx);
   if (runPreflight) {
     (async () => {
@@ -263,20 +269,27 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       log.error("listenMqtt", `Failed to create proxy agent: ${error.message}`);
     }
   }
+  // Create raw WebSocket first so we can attach diagnostics hooks.
+  const rawWs = new WebSocket(host, options.wsOptions);
+  try { require('../lib/mqtt/MqttDiagnostics')(rawWs, ctx, log); } catch(_) {}
   ctx.mqttClient = new mqtt.Client(
-    () =>
-      buildStream(
-        options,
-        new WebSocket(host, options.wsOptions),
-        buildProxy()
-      ),
+    () => buildStream(options, rawWs, buildProxy()),
     options
   );
+  log.info('listenMqtt', `Connecting to ${host}`);
   const mqttClient = ctx.mqttClient;
   global.mqttClient = mqttClient;
   mqttClient.on('error', function (err) {
     const errMsg = (err && (err.error || err.message || "")).toString();
     ctx.health.onError(errMsg.includes('not logged in') ? 'not_logged_in' : 'mqtt_error');
+    // Increment failure counter for health tracking
+    if(ctx.health && typeof ctx.health.incFailure === 'function') ctx.health.incFailure();
+    if(!errMsg){
+      log.error('listenMqtt', 'Empty error message (mqtt error event). Raw err object: ' + JSON.stringify(Object.getOwnPropertyNames(err || {}).reduce((a,k)=>{a[k]=err[k];return a;},{})));
+    }
+    else {
+      log.error('listenMqtt', `MQTT error after ${(Date.now()-attemptStartTs)}ms: ${errMsg}`);
+    }
     log.error("listenMqtt", errMsg);
     try { mqttClient.end(true); } catch(_){ }
     if (/not logged in|login_redirect|html_login_page/i.test(errMsg)) {
@@ -294,6 +307,8 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   // Ensure reconnection also triggers on unexpected close without prior error
   mqttClient.on('close', function () {
     ctx.health.onDisconnect();
+  if(ctx.health && typeof ctx.health.incFailure === 'function'){ ctx.health.incFailure(); }
+  log.warn('listenMqtt', `Socket closed after ${(Date.now()-attemptStartTs)}ms (attempt #${ctx._mqttDiag.attempts}).`);
     if (!ctx.loggedIn) return; // avoid loops if logged out
     if (ctx.globalOptions.autoReconnect) {
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
@@ -301,6 +316,8 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   });
   mqttClient.on('disconnect', function(){
     ctx.health.onDisconnect();
+  if(ctx.health && typeof ctx.health.incFailure === 'function'){ ctx.health.incFailure(); }
+  log.warn('listenMqtt', `MQTT disconnect event after ${(Date.now()-attemptStartTs)}ms (attempt #${ctx._mqttDiag.attempts}).`);
     if (!ctx.loggedIn) return;
     if (ctx.globalOptions.autoReconnect) {
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
@@ -309,6 +326,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   mqttClient.on("connect", function () {
     resetBackoff(backoff);
     ctx.health.onConnect();
+  log.info('listenMqtt', `Connected in ${(Date.now()-attemptStartTs)}ms (attempt #${ctx._mqttDiag.attempts}).`);
     if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch(_) {} }
     if (process.env.OnStatus === undefined) {
       logger("Nexus-FCA premium features works only with Nexus-Bot framework(Kidding)", "info");
@@ -418,7 +436,8 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       } else if (topic == "/ls_resp") {
         const parsedPayload = JSON.parse(jsonMessage.payload);
         const reqID = jsonMessage.request_id;
-        if (ctx["tasks"].has(reqID)) {
+  // Guard: ctx.tasks may be empty; only proceed if it's a Map and contains the reqID
+  if (ctx.tasks && typeof ctx.tasks.has === 'function' && ctx.tasks.has(reqID)) {
           const taskData = ctx["tasks"].get(reqID);
           const { type: taskType, callback: taskCallback } = taskData;
           const taskRespData = getTaskResponseData(taskType, parsedPayload);
