@@ -68,6 +68,7 @@ function resetBackoff(state){
 // Build lazy preflight gating
 function shouldRunPreflight(ctx){
   if(ctx.globalOptions.disablePreflight) return false;
+  if(process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true') return false;
   // If we connected successfully within last 10 minutes, skip heavy preflight to reduce surface.
   const now = Date.now();
   const metrics = ctx.health;
@@ -174,8 +175,9 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   const backoff = getBackoffState(ctx);
   if(!ctx._mqttDiag) ctx._mqttDiag = { attempts:0, events:[] }; 
   ctx._mqttDiag.attempts++;
-  // Suppress previously noisy test info log (kept only if verbose flag enabled)
-  if (ctx.globalOptions && ctx.globalOptions.verboseMqtt) {
+  // Suppress previously noisy test info log (visible only if verbose flag enabled or env toggled)
+  const verboseMqtt = (ctx.globalOptions && ctx.globalOptions.verboseMqtt) || process.env.NEXUS_VERBOSE_MQTT === '1' || process.env.NEXUS_VERBOSE_MQTT === 'true';
+  if (verboseMqtt) {
     log.info('listenMqtt', `Starting Nexus MQTT bridge (attempt=${ctx._mqttDiag.attempts}, backoff=${backoff.current||0}ms)`);
   }
   const runPreflight = shouldRunPreflight(ctx);
@@ -251,7 +253,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
         Upgrade: "websocket",
         "Sec-WebSocket-Version": "13",
         "Accept-Encoding": "gzip, deflate, br",
-        "Accept-Language": "vi,en;q=0.9",
+  "Accept-Language": (ctx.globalOptions && ctx.globalOptions.acceptLanguage) || process.env.NEXUS_ACCEPT_LANGUAGE || "en-US,en;q=0.9",
         "Sec-WebSocket-Extensions":
           "permessage-deflate; client_max_window_bits",
       },
@@ -264,6 +266,11 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     reconnectPeriod: 1000,
     connectTimeout: 5000,
   };
+  // Proxy support via option or environment
+  if (ctx.globalOptions.proxy === undefined) {
+    const envProxy = process.env.NEXUS_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+    if (envProxy) ctx.globalOptions.proxy = envProxy;
+  }
   if (ctx.globalOptions.proxy !== undefined) {
     try {
       const agent = new HttpsProxyAgent(ctx.globalOptions.proxy);
@@ -279,7 +286,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     () => buildStream(options, rawWs, buildProxy()),
     options
   );
-  if (ctx.globalOptions && ctx.globalOptions.verboseMqtt) {
+  if (verboseMqtt) {
     log.info('listenMqtt', `MQTT bridge dialing ${host}`);
   }
   const mqttClient = ctx.mqttClient;
@@ -331,7 +338,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   mqttClient.on("connect", function () {
     resetBackoff(backoff);
     ctx.health.onConnect();
-  if (ctx.globalOptions && ctx.globalOptions.verboseMqtt) {
+  if (verboseMqtt) {
     log.info('listenMqtt', `Nexus MQTT bridge established in ${(Date.now()-attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);
   }
     if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch(_) {} }

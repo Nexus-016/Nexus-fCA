@@ -147,6 +147,7 @@ const login = require('nexus-fca');
 |----------|----------|
 | Full API Reference | `DOCS.md` |
 | Feature Guides | `docs/*.md` |
+| Configuration Reference | `docs/configuration-reference.md` |
 | Safety Details | `docs/account-safety.md` |
 | Examples | `examples/` |
 

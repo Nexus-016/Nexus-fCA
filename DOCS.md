@@ -2,6 +2,8 @@
 
 > Advanced, safe, high-performance Facebook Messenger automation with integrated secure login, ultra‑low ban rate protections, and modern modular architecture.
 
+Quick links: [Configuration Reference](./docs/configuration-reference.md) · [Deployment Guide](./docs/deployment-config.md)
+
 ---
 ## 🆕 Version 2.1.0 – Session Stability & Safety Upgrade
 **Key Enhancements**

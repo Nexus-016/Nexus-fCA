@@ -22,6 +22,9 @@ This folder contains comprehensive documentation for all features of Nexus-FCA, 
 ### 🔧 Core API Documentation
 Each `.md` file documents a single core API feature with usage examples, parameters, and safety notes.
 
+Additional references:
+- [Configuration Reference](./configuration-reference.md) — all env vars, programmatic options, and config file keys
+
 ### 🔗 Migration Guides
 - **[Migration-fca-unofficial.md](./Migration-fca-unofficial.md)** - Migrate from fca-unofficial
 - **[Migration-ws3-fca.md](./Migration-ws3-fca.md)** - Migrate from ws3-fca  

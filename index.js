@@ -51,6 +51,7 @@ const { User } = require('./lib/message/User');
 
 // Advanced Safety Module - Minimizes ban/lock/checkpoint rates
 const FacebookSafety = require('./lib/safety/FacebookSafety');
+const { SingleSessionGuard } = require('./lib/safety/SingleSessionGuard');
 
 // Core compatibility imports
 const MqttManager = require('./lib/mqtt/MqttManager');
@@ -194,6 +195,10 @@ function buildAPI(globalOptions, html, jar) {
     }
   } catch (e) {
     log.warning("login", "Not MQTT endpoint");
+  }
+  // Allow environment override for region (useful on PaaS where HTML may omit region or mismatch)
+  if (process.env.NEXUS_REGION) {
+    try { region = process.env.NEXUS_REGION.toUpperCase(); } catch(_) {}
   }
   const tokenMatch = html.match(/DTSGInitialData.*?token":"(.*?)"/);
   if (tokenMatch) {
@@ -557,20 +562,24 @@ const crypto = require('crypto');
 
 class IntegratedNexusLoginSystem {
     constructor(options = {}) {
-        this.options = {
-            appstatePath: options.appstatePath || path.join(process.cwd(), 'appstate.json'),
-            credentialsPath: options.credentialsPath || path.join(process.cwd(), 'credentials.json'),
-            backupPath: options.backupPath || path.join(process.cwd(), 'backups'),
-            autoLogin: options.autoLogin !== false,
-            autoSave: options.autoSave !== false,
-            safeMode: options.safeMode !== false,
-            maxRetries: options.maxRetries || 3,
-            retryDelay: options.retryDelay || 5000,
-            // New: persistentDevice disables random device rotation
-            persistentDevice: options.persistentDevice !== false,
-            persistentDeviceFile: options.persistentDeviceFile || path.join(process.cwd(), 'persistent-device.json'),
-            ...options
-        };
+    const dataDir = process.env.NEXUS_DATA_DIR || process.env.RENDER_DATA_DIR || process.cwd();
+    const envPersistent = (v) => (v === '0' || v === 'false') ? false : (v === '1' || v === 'true') ? true : undefined;
+    const envPD = envPersistent(process.env.NEXUS_PERSISTENT_DEVICE);
+
+    this.options = {
+      appstatePath: options.appstatePath || process.env.NEXUS_APPSTATE_PATH || path.join(dataDir, 'appstate.json'),
+      credentialsPath: options.credentialsPath || process.env.NEXUS_CREDENTIALS_PATH || path.join(dataDir, 'credentials.json'),
+      backupPath: options.backupPath || process.env.NEXUS_BACKUP_PATH || path.join(dataDir, 'backups'),
+      autoLogin: options.autoLogin !== false,
+      autoSave: options.autoSave !== false,
+      safeMode: options.safeMode !== false,
+      maxRetries: options.maxRetries || 3,
+      retryDelay: options.retryDelay || 5000,
+      // New: persistentDevice disables random device rotation
+      persistentDevice: typeof envPD === 'boolean' ? envPD : (options.persistentDevice !== false),
+      persistentDeviceFile: options.persistentDeviceFile || process.env.NEXUS_DEVICE_FILE || path.join(dataDir, 'persistent-device.json'),
+      ...options
+    };
 
         this.deviceCache = new Map();
         this.loginAttempts = 0;
@@ -578,9 +587,29 @@ class IntegratedNexusLoginSystem {
         // New: load previously persisted device if any
         this.fixedDeviceProfile = this.loadPersistentDevice();
         
-        this.ensureDirectories();
+    this.ensureDirectories();
         this.logger('Login system ready', '🚀');
     }
+
+  ensureDirectories() {
+    try {
+      // backups dir
+      if (this.options.backupPath && !fs.existsSync(this.options.backupPath)) {
+        fs.mkdirSync(this.options.backupPath, { recursive: true });
+      }
+      // parent dir for appstate
+      const appstateDir = path.dirname(this.options.appstatePath);
+      if (!fs.existsSync(appstateDir)) fs.mkdirSync(appstateDir, { recursive: true });
+      // parent dir for credentials
+      const credDir = path.dirname(this.options.credentialsPath);
+      if (!fs.existsSync(credDir)) fs.mkdirSync(credDir, { recursive: true });
+      // parent dir for persistent device
+      const pdDir = path.dirname(this.options.persistentDeviceFile);
+      if (!fs.existsSync(pdDir)) fs.mkdirSync(pdDir, { recursive: true });
+    } catch (e) {
+      this.logger('Failed to ensure directories: ' + e.message, '⚠️');
+    }
+  }
 
     loadPersistentDevice() {
         try {
@@ -1102,7 +1131,7 @@ async function integratedNexusLogin(credentials = null, options = {}) {
         
         try {
             // Prepare global options for bot system
-            const globalOptions = {
+      const globalOptions = {
                 selfListen: false,
                 selfListenEvent: false,
                 listenEvents: false,
@@ -1113,9 +1142,12 @@ async function integratedNexusLogin(credentials = null, options = {}) {
                 autoMarkRead: false,
                 autoReconnect: true,
                 logRecordSize: defaultLogRecordSize,
-                online: true,
+        online: (process.env.NEXUS_ONLINE ? (process.env.NEXUS_ONLINE === '1' || process.env.NEXUS_ONLINE === 'true') : true),
                 emitReady: false,
-                userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        userAgent: process.env.NEXUS_UA || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        proxy: process.env.NEXUS_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
+        acceptLanguage: process.env.NEXUS_ACCEPT_LANGUAGE || 'en-US,en;q=0.9',
+        disablePreflight: process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true',
                 ...options
             };
 
@@ -1229,7 +1261,18 @@ async function login(loginData, options = {}, callback) {
       mainLogger.info('✅ Session generated successfully');
       mainLogger.info('🔄 Starting bot with generated session (old system)');
       
-      // STEP 2: ALWAYS use OLD system for actual login/session/bot
+      // STEP 2: Single session guard before starting bot
+      try {
+        const ssg = new SingleSessionGuard({ dataDir: process.env.NEXUS_DATA_DIR });
+        ssg.acquire();
+        // keep guard reference to release on exit
+        global.__NEXUS_SSG__ = ssg;
+      } catch (e) {
+        mainLogger.error('⚠️ Single session guard blocked start', e.message);
+        if (callback) callback(e);
+        return usePromise ? promise : undefined;
+      }
+      // STEP 3: ALWAYS use OLD system for actual login/session/bot
       const globalOptions = {
         selfListen: false,
         selfListenEvent: false,
@@ -1271,7 +1314,16 @@ async function login(loginData, options = {}, callback) {
       return usePromise ? promise : undefined;
     }
     
-    // Direct session authentication using appstate
+    // Direct session authentication using appstate (with single session guard)
+    try {
+      const ssg = new SingleSessionGuard({ dataDir: process.env.NEXUS_DATA_DIR });
+      ssg.acquire();
+      global.__NEXUS_SSG__ = ssg;
+    } catch (e) {
+      mainLogger.error('⚠️ Single session guard blocked start', e.message);
+      if (callback) callback(e);
+      return usePromise ? promise : undefined;
+    }
     mainLogger.info('🔄 Starting session authentication');
     
     const globalOptions = {
@@ -1285,9 +1337,12 @@ async function login(loginData, options = {}, callback) {
       autoMarkRead: false,
       autoReconnect: true,
       logRecordSize: defaultLogRecordSize,
-      online: true,
+      online: (process.env.NEXUS_ONLINE ? (process.env.NEXUS_ONLINE === '1' || process.env.NEXUS_ONLINE === 'true') : true),
       emitReady: false,
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      userAgent: process.env.NEXUS_UA || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      proxy: process.env.NEXUS_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
+      acceptLanguage: process.env.NEXUS_ACCEPT_LANGUAGE || 'en-US,en;q=0.9',
+      disablePreflight: process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true',
       ...options
     };
     
