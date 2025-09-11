@@ -1,6 +1,6 @@
 {
   "name": "nexus-fca",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "description": "Nexus-FCA 3.0 – stable, low-risk Facebook Messenger automation API with integrated secure login (ID / Password / 2FA), adaptive MQTT core, safety orchestration, metrics, and TypeScript support.",
   "main": "index.js",
   "repository": {

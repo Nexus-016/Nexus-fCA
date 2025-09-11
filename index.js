@@ -7,6 +7,8 @@ const { promises: fsPromises, readFileSync } = require('fs');
 const fs = require('fs');
 const axios = require('axios');
 const path = require('path');
+const crypto = require("crypto");
+const { v4: uuidv4 } = require("uuid");
 const models = require("./lib/database/models");
 const logger = require("./lib/logger");
 const { safeMode, ultraSafeMode, smartSafetyLimiter, isUserAllowed } = require('./utils'); // Enhanced safety system
@@ -52,6 +54,8 @@ const { User } = require('./lib/message/User');
 // Advanced Safety Module - Minimizes ban/lock/checkpoint rates
 const FacebookSafety = require('./lib/safety/FacebookSafety');
 const { SingleSessionGuard } = require('./lib/safety/SingleSessionGuard');
+const { CookieRefresher } = require('./lib/safety/CookieRefresher');
+const { CookieManager } = require('./lib/safety/CookieManager');
 
 // Core compatibility imports
 const MqttManager = require('./lib/mqtt/MqttManager');
@@ -459,7 +463,14 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
     }
 
     try {
-      appState.forEach(c => {
+      // Fix any cookie expiry issues before setting
+      const fixedAppState = CookieManager.fixCookieExpiry(appState, {
+        defaultExpiryDays: 90,
+        criticalExpiryDays: 90,
+        refreshExisting: true
+      });
+      
+      fixedAppState.forEach(c => {
         const str = `${c.key}=${c.value}; expires=${c.expires}; domain=${c.domain}; path=${c.path};`;
         jar.setCookie(str, "http://" + c.domain);
       });
@@ -520,7 +531,48 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       logger('✅ Session authenticated successfully', 'info');
       // Initialize safety monitoring
       globalSafety.startMonitoring(ctx, api);
-  try { globalSafety.startDynamicSystems(); } catch(_) {}
+      try { globalSafety.startDynamicSystems(); } catch(_) {}
+      
+      // Initialize Cookie Refresher to prevent cookie expiry (env-configurable)
+      try {
+        const envBool = (v) => (v === '1' || (v && v.toLowerCase && v.toLowerCase() === 'true'));
+        const toInt = (v, def) => {
+          const n = parseInt(v, 10);
+          return Number.isFinite(n) && n > 0 ? n : def;
+        };
+
+        const refreshEnabled = process.env.NEXUS_COOKIE_REFRESH_ENABLED ? envBool(process.env.NEXUS_COOKIE_REFRESH_ENABLED) : true;
+        const refreshInterval = toInt(process.env.NEXUS_COOKIE_REFRESH_INTERVAL, 30 * 60 * 1000);
+        const expiryDays = toInt(process.env.NEXUS_COOKIE_EXPIRY_DAYS, 90);
+        const maxBackups = toInt(process.env.NEXUS_COOKIE_MAX_BACKUPS, 5);
+        const backupsEnabled = process.env.NEXUS_COOKIE_BACKUP_ENABLED ? envBool(process.env.NEXUS_COOKIE_BACKUP_ENABLED) : true;
+
+        const cookieRefresher = new CookieRefresher({
+          enabled: refreshEnabled,
+          cookieRefreshIntervalMs: refreshInterval,
+          forceExpiryExtension: true,
+          expiryDays: expiryDays,
+          backupEnabled: backupsEnabled,
+          maxBackups: maxBackups
+        });
+        
+        // Get appstate path from options or ctx
+  const appstatePath = globalOptions.appstatePath || process.env.NEXUS_APPSTATE_PATH || (ctx.dataDir ? path.join(ctx.dataDir, 'appstate.json') : null);
+  const backupPath = process.env.NEXUS_COOKIE_BACKUP_PATH || globalOptions.backupPath || (ctx.dataDir ? path.join(ctx.dataDir, 'backups') : null);
+        
+        if (appstatePath) {
+          ctx.cookieRefresher = cookieRefresher.initialize(ctx, utils, defaultFuncs, appstatePath, backupPath);
+          logger('✅ Cookie Refresher initialized - cookies will be kept fresh', 'info');
+          
+          // Immediate first refresh to ensure long expiry
+          cookieRefresher.refreshNow().catch(err => {
+            logger(`❌ Initial cookie refresh failed: ${err.message}`, 'warn');
+          });
+        }
+      } catch (err) {
+        logger(`❌ Cookie Refresher initialization failed: ${err.message}`, 'error');
+      }
+      
       // Consolidated: delegate light poke to unified safety module (prevents duplicate refresh scheduling)
       if (globalSafety && typeof globalSafety.scheduleLightPoke === 'function') {
         globalSafety.scheduleLightPoke();
@@ -556,9 +608,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
 
 // --- INTEGRATED NEXUS LOGIN SYSTEM ---
 // Full Nexus Login System integrated for npm package compatibility
-const { v4: uuidv4 } = require('uuid');
 const { TOTP } = require("totp-generator");
-const crypto = require('crypto');
 
 class IntegratedNexusLoginSystem {
     constructor(options = {}) {
@@ -723,7 +773,56 @@ class IntegratedNexusLoginSystem {
         try {
             const appstate = JSON.parse(fs.readFileSync(this.options.appstatePath, 'utf8'));
             this.logger(`Loaded appstate with ${appstate.length} cookies`, '✅');
-            return appstate;
+            
+            // Enhanced: Check and fix cookie expiry
+            const fixedAppstate = CookieManager.fixCookieExpiry(appstate, {
+                defaultExpiryDays: 90,
+                criticalExpiryDays: 90,
+                refreshExisting: true
+            });
+            
+            // Save the fixed appstate back to file
+            if (fixedAppstate !== appstate) {
+                fs.writeFileSync(this.options.appstatePath, JSON.stringify(fixedAppstate, null, 2));
+                this.logger('Fixed cookie expiry dates and saved appstate', '🔧');
+            }
+            
+            // Validate critical cookies
+            const validation = CookieManager.validateCriticalCookies(fixedAppstate);
+            if (!validation.valid) {
+                this.logger(`Warning: Missing critical cookies: ${validation.missing.join(', ')}`, '⚠️');
+            }
+
+      // Warn if any critical cookies are expiring soon (< 7 days)
+      try {
+        const critical = new Set(['c_user', 'xs', 'fr', 'datr', 'sb', 'spin']);
+        let hasExpiringSoon = false;
+        for (const cookie of fixedAppstate) {
+          if (!cookie || !cookie.key || !critical.has(cookie.key)) continue;
+          if (!cookie.expires) continue;
+          try {
+            const expiry = new Date(cookie.expires);
+            if (isNaN(expiry.getTime())) {
+              this.logger(`Warning: ${cookie.key} cookie has invalid expiry format: ${cookie.expires}`, '⚠️');
+              hasExpiringSoon = true;
+              continue;
+            }
+            const daysRemaining = Math.floor((expiry - new Date()) / (1000 * 60 * 60 * 24));
+            if (daysRemaining < 7) {
+              this.logger(`Warning: ${cookie.key} cookie expires in ${daysRemaining} days`, '⚠️');
+              hasExpiringSoon = true;
+            }
+          } catch (_) {
+            this.logger(`Warning: ${cookie.key} cookie has invalid expiry format: ${cookie.expires}`, '⚠️');
+            hasExpiringSoon = true;
+          }
+        }
+        if (hasExpiringSoon) {
+          this.logger(`Some critical cookies expire soon - Cookie Refresher will extend them`, 'ℹ️');
+        }
+      } catch (_) {}
+            
+      return fixedAppstate;
         } catch (error) {
             this.logger(`Failed to load appstate: ${error.message}`, '❌');
             return null;
@@ -732,14 +831,21 @@ class IntegratedNexusLoginSystem {
 
     saveAppstate(appstate, metadata = {}) {
         try {
-            fs.writeFileSync(this.options.appstatePath, JSON.stringify(appstate, null, 2));
+            // First fix any cookie expiry issues
+            const fixedAppstate = CookieManager.fixCookieExpiry(appstate, {
+                defaultExpiryDays: 90,
+                criticalExpiryDays: 90,
+                refreshExisting: false
+            });
+            
+            fs.writeFileSync(this.options.appstatePath, JSON.stringify(fixedAppstate, null, 2));
             
             // Create backup
             const backupName = `appstate_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
             const backupPath = path.join(this.options.backupPath, backupName);
             
             const backupData = {
-                appstate,
+                appstate: fixedAppstate,
                 metadata: {
                     ...metadata,
                     created: new Date().toISOString(),
@@ -851,7 +957,7 @@ class IntegratedNexusLoginSystem {
                                 value: cookie.value,
                                 domain: cookie.domain,
                                 path: cookie.path,
-                                expires: cookie.expires,
+                                expires: cookie.expires ? new Date(cookie.expires * 1000).toUTCString() : CookieManager.getDefaultExpiry(cookie.name),
                                 httpOnly: cookie.httpOnly,
                                 secure: cookie.secure
                             }));
@@ -861,7 +967,9 @@ class IntegratedNexusLoginSystem {
                                     key: 'i_user',
                                     value: credentials.i_user,
                                     domain: '.facebook.com',
-                                    path: '/'
+                                    path: '/',
+                                    expires: CookieManager.getDefaultExpiry('i_user'),
+                                    secure: true
                                 });
                             }
 
@@ -951,7 +1059,7 @@ class IntegratedNexusLoginSystem {
                                 value: cookie.value,
                                 domain: cookie.domain,
                                 path: cookie.path,
-                                expires: cookie.expires,
+                                expires: cookie.expires ? new Date(cookie.expires * 1000).toUTCString() : CookieManager.getDefaultExpiry(cookie.name),
                                 httpOnly: cookie.httpOnly,
                                 secure: cookie.secure
                             }));
@@ -961,7 +1069,9 @@ class IntegratedNexusLoginSystem {
                                     key: 'i_user',
                                     value: credentials.i_user,
                                     domain: '.facebook.com',
-                                    path: '/'
+                                    path: '/',
+                                    expires: CookieManager.getDefaultExpiry('i_user'),
+                                    secure: true
                                 });
                             }
 
