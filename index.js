@@ -1371,12 +1371,18 @@ async function login(loginData, options = {}, callback) {
       mainLogger.info('✅ Session generated successfully');
       mainLogger.info('🔄 Starting bot with generated session (old system)');
       
-      // STEP 2: Single session guard before starting bot
+      // STEP 2: Single session guard before starting bot (configurable)
       try {
-        const ssg = new SingleSessionGuard({ dataDir: process.env.NEXUS_DATA_DIR });
-        ssg.acquire();
-        // keep guard reference to release on exit
-        global.__NEXUS_SSG__ = ssg;
+        const lockEnabled = (typeof options.sessionLockEnabled !== 'undefined')
+          ? !!options.sessionLockEnabled
+          : !(process.env.NEXUS_SESSION_LOCK_ENABLED === '0' || (process.env.NEXUS_SESSION_LOCK_ENABLED || '').toLowerCase() === 'false');
+
+        if (lockEnabled) {
+          const ssg = new SingleSessionGuard({ dataDir: process.env.NEXUS_DATA_DIR });
+          ssg.acquire();
+          // keep guard reference to release on exit
+          global.__NEXUS_SSG__ = ssg;
+        }
       } catch (e) {
         mainLogger.error('⚠️ Single session guard blocked start', e.message);
         if (callback) callback(e);
@@ -1426,9 +1432,15 @@ async function login(loginData, options = {}, callback) {
     
     // Direct session authentication using appstate (with single session guard)
     try {
-      const ssg = new SingleSessionGuard({ dataDir: process.env.NEXUS_DATA_DIR });
-      ssg.acquire();
-      global.__NEXUS_SSG__ = ssg;
+      const lockEnabled = (typeof options.sessionLockEnabled !== 'undefined')
+        ? !!options.sessionLockEnabled
+        : !(process.env.NEXUS_SESSION_LOCK_ENABLED === '0' || (process.env.NEXUS_SESSION_LOCK_ENABLED || '').toLowerCase() === 'false');
+
+      if (lockEnabled) {
+        const ssg = new SingleSessionGuard({ dataDir: process.env.NEXUS_DATA_DIR });
+        ssg.acquire();
+        global.__NEXUS_SSG__ = ssg;
+      }
     } catch (e) {
       mainLogger.error('⚠️ Single session guard blocked start', e.message);
       if (callback) callback(e);

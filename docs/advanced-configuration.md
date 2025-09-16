@@ -14,7 +14,8 @@ NEXUS_PERSISTENT_DEVICE=true    # Enable consistent device fingerprinting (defau
 NEXUS_DEVICE_FILE=./device.json # Custom path to device profile file
 
 # Single-session guard (built-in)
-# Uses SingleSessionGuard with NEXUS_SESSION_LOCK_PATH and NEXUS_FORCE_LOCK
+# Toggle and configure SingleSessionGuard
+NEXUS_SESSION_LOCK_ENABLED=true # Enable/disable lock globally (default true)
 NEXUS_SESSION_LOCK_PATH=./lock  # Path to session lock file used by SingleSessionGuard
 NEXUS_FORCE_LOCK=false          # Force acquire lock even if lock exists
 
@@ -62,8 +63,8 @@ const api = await login({
   // Session stability options
   persistentDevice: true,           // Use consistent device fingerprinting
   deviceFilePath: './device.json',  // Custom device profile path
-  // Single-session guard is enabled by default internally
-  // Configure via env: NEXUS_SESSION_LOCK_PATH, NEXUS_FORCE_LOCK
+  // Single-session guard (optional toggle)
+  sessionLockEnabled: true,        // or control via env NEXUS_SESSION_LOCK_ENABLED
   
   // Connection options
   region: 'NA',                     // Set fixed region
