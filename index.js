@@ -1373,9 +1373,10 @@ async function login(loginData, options = {}, callback) {
       
       // STEP 2: Single session guard before starting bot (configurable)
       try {
+        const envLockFlag = process.env.NEXUS_SESSION_LOCK_ENABLED;
         const lockEnabled = (typeof options.sessionLockEnabled !== 'undefined')
           ? !!options.sessionLockEnabled
-          : !(process.env.NEXUS_SESSION_LOCK_ENABLED === '0' || (process.env.NEXUS_SESSION_LOCK_ENABLED || '').toLowerCase() === 'false');
+          : (envLockFlag === '1' || (envLockFlag || '').toLowerCase() === 'true');
 
         if (lockEnabled) {
           const ssg = new SingleSessionGuard({ dataDir: process.env.NEXUS_DATA_DIR });
@@ -1432,9 +1433,10 @@ async function login(loginData, options = {}, callback) {
     
     // Direct session authentication using appstate (with single session guard)
     try {
+      const envLockFlag = process.env.NEXUS_SESSION_LOCK_ENABLED;
       const lockEnabled = (typeof options.sessionLockEnabled !== 'undefined')
         ? !!options.sessionLockEnabled
-        : !(process.env.NEXUS_SESSION_LOCK_ENABLED === '0' || (process.env.NEXUS_SESSION_LOCK_ENABLED || '').toLowerCase() === 'false');
+        : (envLockFlag === '1' || (envLockFlag || '').toLowerCase() === 'true');
 
       if (lockEnabled) {
         const ssg = new SingleSessionGuard({ dataDir: process.env.NEXUS_DATA_DIR });
