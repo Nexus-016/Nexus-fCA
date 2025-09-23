@@ -271,13 +271,17 @@ function buildAPI(globalOptions, html, jar) {
       );
     },
     healthCheck: function(callback) {
-      callback(null, {
+      const result = {
         status: 'ok',
         safeMode,
         time: new Date().toISOString(),
         userID: ctx.userID || null,
         metrics: ctx.health ? ctx.health.snapshot() : null
-      });
+      };
+      if (typeof callback === 'function') {
+        return callback(null, result);
+      }
+      return Promise.resolve(result);
     },
     getHealthMetrics: function(){ return ctx.health ? ctx.health.snapshot() : null; },
   getMqttDiagnostics: function(){ return ctx.getMqttDiagnostics ? ctx.getMqttDiagnostics() : (ctx._mqttDiag || null); },
@@ -360,34 +364,97 @@ function buildAPI(globalOptions, html, jar) {
     // New: group queue retention policy
     globalOptions.groupQueueIdleMs = 30*60*1000; // 30m idle purge
 
-    api._sendMessageDirect = DIRECT_FN;
-    api.sendMessage = function(message, threadID, cb){
-      if(!globalOptions.groupQueueEnabled || !isGroupThread(threadID)) {
-        return api._sendMessageDirect(message, threadID, cb);
+    function prepareSendArgs(args) {
+      const finalArgs = Array.from(args);
+      let callbackIndex = finalArgs.findIndex((arg, idx) => idx >= 2 && typeof arg === 'function');
+      let promise = null;
+      if (callbackIndex === -1) {
+        let resolver;
+        promise = new Promise((resolve, reject) => {
+          resolver = (err, res) => (err ? reject(err) : resolve(res));
+        });
+        if (finalArgs.length <= 2) {
+          finalArgs.push(resolver);
+          callbackIndex = finalArgs.length - 1;
+        } else if (finalArgs[2] == null) {
+          finalArgs[2] = resolver;
+          callbackIndex = 2;
+        } else {
+          finalArgs.splice(2, 0, resolver);
+          callbackIndex = 2;
+        }
       }
+
+      return { args: finalArgs, callbackIndex, promise };
+    }
+
+    api._sendMessageDirect = DIRECT_FN;
+    api.sendMessage = function (...callArgs) {
+      const threadID = callArgs[1];
+      const { args, callbackIndex, promise } = prepareSendArgs(callArgs);
+
+      if (!globalOptions.groupQueueEnabled || !isGroupThread(threadID)) {
+        const result = api._sendMessageDirect.apply(api, args);
+        return promise || result;
+      }
+
       let entry = groupQueues.get(threadID);
-      if(!entry){ entry = { q: [], sending: false, lastActive: Date.now() }; groupQueues.set(threadID, entry); }
+      if (!entry) {
+        entry = { q: [], sending: false, lastActive: Date.now() };
+        groupQueues.set(threadID, entry);
+      }
       entry.lastActive = Date.now();
-      if(entry.q.length >= (globalOptions.groupQueueMax||100)) {
+      if (entry.q.length >= (globalOptions.groupQueueMax || 100)) {
         // drop oldest (keep newest) to avoid unbounded growth
         entry.q.shift();
-        if(ctx.health) ctx.health.recordGroupQueuePrune(0,0,1);
+        if (ctx.health) ctx.health.recordGroupQueuePrune(0, 0, 1);
       }
-      entry.q.push({ message, threadID, cb });
+      entry.q.push({ args, callbackIndex, threadID });
       processQueue(threadID, entry);
+      return promise;
     };
 
-    function processQueue(threadID, entry){
-      if(entry.sending) return;
-      if(!entry.q.length) return;
+    function dispatchMessage(item, trackSafety, onComplete) {
+      const args = item.args.slice();
+      const callbackIndex = item.callbackIndex;
+      const originalCallback = callbackIndex >= 0 ? args[callbackIndex] : null;
+
+      const wrappedCallback = (err, res) => {
+        if (trackSafety) {
+          try {
+            if (!err) globalSafety.recordEvent();
+          } catch (_) {}
+        }
+        if (typeof originalCallback === 'function') {
+          try {
+            originalCallback(err, res);
+          } catch (callbackErr) {
+            log.warn('sendMessage', 'Callback threw an error:', callbackErr);
+          }
+        }
+        if (typeof onComplete === 'function') {
+          onComplete(err, res);
+        }
+      };
+
+      if (callbackIndex >= 0) {
+        args[callbackIndex] = wrappedCallback;
+      } else {
+        args.push(wrappedCallback);
+      }
+
+      api._sendMessageDirect.apply(api, args);
+    }
+
+    function processQueue(threadID, entry) {
+      if (entry.sending) return;
+      if (!entry.q.length) return;
       entry.sending = true;
-      const { message, threadID: tid, cb } = entry.q.shift();
-      api._sendMessageDirect(message, tid, function(err, res){
-        try { if(!err) globalSafety.recordEvent(); } catch(_) {}
-        if(typeof cb === 'function') cb(err, res);
+      const item = entry.q.shift();
+      dispatchMessage(item, true, () => {
         entry.sending = false;
         // Immediately process next (no cooldown) to keep strict sequence
-        setImmediate(()=>processQueue(threadID, entry));
+        setImmediate(() => processQueue(threadID, entry));
       });
     }
 
@@ -396,7 +463,7 @@ function buildAPI(globalOptions, html, jar) {
       if(!entry) return;
       while(entry.q.length) {
         const item = entry.q.shift();
-        api._sendMessageDirect(item.message, item.threadID, item.cb);
+        dispatchMessage(item, true);
       }
       entry.sending = false;
     };

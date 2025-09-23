@@ -1108,6 +1108,7 @@ module.exports = function (defaultFuncs, api, ctx) {
       }
     }
     const msgEmitter = new MessageEmitter();
+    const emitterPromise = Promise.resolve(msgEmitter);
     globalCallback =
       callback ||
       function (error, message) {
@@ -1141,6 +1142,9 @@ module.exports = function (defaultFuncs, api, ctx) {
     }
     api.stopListening = msgEmitter.stopListening;
     api.stopListeningAsync = msgEmitter.stopListeningAsync;
+    msgEmitter.then = emitterPromise.then.bind(emitterPromise);
+    msgEmitter.catch = emitterPromise.catch.bind(emitterPromise);
+    msgEmitter.finally = emitterPromise.finally.bind(emitterPromise);
     return msgEmitter;
   };
 };

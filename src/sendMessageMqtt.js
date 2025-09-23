@@ -230,27 +230,39 @@ module.exports = function (defaultFuncs, api, ctx) {
 		});
 	}
 
-	return function sendMessageMqtt(msg, threadID, callback, replyToMessage) {
-		if (
-			!callback &&
-			(utils.getType(threadID) === "Function" ||
-				utils.getType(threadID) === "AsyncFunction")
-		) {
-			return threadID({ error: "Pass a threadID as a second argument." });
-		}
-		if (
-			!replyToMessage &&
-			utils.getType(callback) === "String"
-		) {
-			replyToMessage = callback;
-			callback = function () { };
-		}
+        return function sendMessageMqtt(msg, threadID, callback, replyToMessage) {
+                if (
+                        !callback &&
+                        (utils.getType(threadID) === "Function" ||
+                                utils.getType(threadID) === "AsyncFunction")
+                ) {
+                        return threadID({ error: "Pass a threadID as a second argument." });
+                }
+                if (
+                        !replyToMessage &&
+                        utils.getType(callback) === "String"
+                ) {
+                        replyToMessage = callback;
+                        callback = undefined;
+                }
 
+                let resolveFunc = null;
+                let rejectFunc = null;
+                let returnPromise = null;
+                if (typeof callback !== "function") {
+                        returnPromise = new Promise((resolve, reject) => {
+                                resolveFunc = resolve;
+                                rejectFunc = reject;
+                        });
+                        callback = function (err, data) {
+                                if (err) return rejectFunc(err);
+                                resolveFunc(data);
+                        };
+                }
 
-		if (!callback) {
-			callback = function (err, friendList) {
-			};
-		}
+                if (!callback) {
+                        callback = function () { };
+                }
 
 		var msgType = utils.getType(msg);
 		var threadIDType = utils.getType(threadID);
@@ -313,16 +325,18 @@ module.exports = function (defaultFuncs, api, ctx) {
 			type: 3
 		};
 
-		handleEmoji(msg, form, callback, function () {
-			handleLocation(msg, form, callback, function () {
-				handleMention(msg, form, callback, function () {
-					handleSticker(msg, form, callback, function () {
-						handleAttachment(msg, form, callback, function () {
-							send(form, threadID, callback, replyToMessage);
-						});
-					});
-				});
-			});
-		});
-	};
+                handleEmoji(msg, form, callback, function () {
+                        handleLocation(msg, form, callback, function () {
+                                handleMention(msg, form, callback, function () {
+                                        handleSticker(msg, form, callback, function () {
+                                                handleAttachment(msg, form, callback, function () {
+                                                        send(form, threadID, callback, replyToMessage);
+                                                });
+                                        });
+                                });
+                        });
+                });
+
+                return returnPromise;
+        };
 };

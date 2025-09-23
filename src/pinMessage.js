@@ -4,18 +4,26 @@
 const { generateOfflineThreadingID } = require('../utils');
 
 function isCallable(func) {
-  try {
-    Reflect.apply(func, null, []);
-    return true;
-  } catch (error) {
-    return false;
-  }
+  return typeof func === 'function';
 }
 
 module.exports = function (defaultFuncs, api, ctx) {
   return function pinMessage(pinMode, messageID, threadID, callback) {
+    let cb = callback;
+    let promise;
+    if (!isCallable(cb)) {
+      promise = new Promise((resolve, reject) => {
+        cb = (err, data) => (err ? reject(err) : resolve(data));
+      });
+    }
+
     if (!ctx.mqttClient) {
-      throw new Error('Not connected to MQTT');
+      const error = new Error('Not connected to MQTT');
+      if (promise) {
+        cb(error);
+        return promise;
+      }
+      throw error;
     }
 
     ctx.wsReqNumber += 1;
@@ -50,10 +58,22 @@ module.exports = function (defaultFuncs, api, ctx) {
       type: 3,
     };
 
-    if (isCallable(callback)) {
-      ctx.reqCallbacks[ctx.wsReqNumber] = callback;
+    if (!ctx.reqCallbacks) {
+      ctx.reqCallbacks = {};
     }
 
-    ctx.mqttClient.publish('/ls_req', JSON.stringify(content), { qos: 1, retain: false });
+    if (isCallable(cb)) {
+      ctx.reqCallbacks[ctx.wsReqNumber] = (err, data) => {
+        cb(err, data);
+      };
+    }
+
+    ctx.mqttClient.publish('/ls_req', JSON.stringify(content), { qos: 1, retain: false }, (err) => {
+      if (err && isCallable(cb)) {
+        cb(err);
+      }
+    });
+
+    return promise;
   };
 };

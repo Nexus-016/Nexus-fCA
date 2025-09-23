@@ -5,6 +5,12 @@ const { generateOfflineThreadingID } = require('../utils');
 
 module.exports = function (defaultFuncs, api, ctx) {
   return function editMessage(text, messageID, callback) {
+    let promise;
+    if (typeof callback !== 'function') {
+      promise = new Promise((resolve, reject) => {
+        callback = (err, data) => (err ? reject(err) : resolve(data));
+      });
+    }
     callback = callback || function(){};
     if (!ctx.mqttClient) {
       return callback(new Error('Not connected to MQTT'));
@@ -44,6 +50,7 @@ module.exports = function (defaultFuncs, api, ctx) {
       if(ctx.health) ctx.health.onError('edit_exception');
       return callback(e);
     }
+    return promise;
   };
 };
 
