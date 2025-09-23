@@ -3,6 +3,14 @@
 
 module.exports = function (defaultFuncs, api, ctx) {
   return function follow(senderID, boolean, callback) {
+    let cb = callback;
+    let promise;
+    if (typeof cb !== 'function') {
+      promise = new Promise((resolve, reject) => {
+        cb = (err, result) => (err ? reject(err) : resolve(result));
+      });
+    }
+
     let form;
     if (boolean) {
       form = {
@@ -48,7 +56,13 @@ module.exports = function (defaultFuncs, api, ctx) {
     }
     defaultFuncs
       .post("https://www.facebook.com/api/graphql/", ctx.jar, form)
-      .then(() => callback && callback(null, true))
-      .catch(err => callback && callback(err, false));
+      .then(() => {
+        if (typeof cb === 'function') cb(null, true);
+      })
+      .catch(err => {
+        if (typeof cb === 'function') cb(err, false);
+      });
+
+    return promise;
   };
 };
