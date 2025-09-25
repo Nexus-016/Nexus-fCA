@@ -6,8 +6,8 @@ const { generateOfflineThreadingID } = require("../utils");
 
 module.exports = function (defaultFuncs, api, ctx) {
   function setMessageReactionNoMqtt(reaction, messageID, callback) {
-    var resolveFunc = function () {};
-    var rejectFunc = function () {};
+    var resolveFunc = function () { };
+    var rejectFunc = function () { };
     var returnPromise = new Promise(function (resolve, reject) {
       resolveFunc = resolve;
       rejectFunc = reject;
@@ -49,13 +49,16 @@ module.exports = function (defaultFuncs, api, ctx) {
         if (resData.error) {
           throw resData;
         }
-        callback(null);
+        if (typeof callback === "function") {
+          callback(null);
+        }
       })
       .catch(function (err) {
         log.error("setReaction", err);
-        return callback(err);
+        if (typeof callback === "function") {
+          return callback(err);
+        }
       });
-
     return returnPromise;
   }
 
@@ -108,7 +111,9 @@ module.exports = function (defaultFuncs, api, ctx) {
     if (ctx.mqttClient) {
       try {
         setMessageReactionMqtt(reaction, messageID, threadID, callback);
-        callback();
+        if (typeof callback === "function") {
+          callback();
+        }
       } catch (e) {
         setMessageReactionNoMqtt(reaction, messageID, callback);
       }
