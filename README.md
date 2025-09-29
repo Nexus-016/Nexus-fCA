@@ -1,6 +1,41 @@
 <p align="center">
-  <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="520" />
+  <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="220" />
 </p>
+
+---
+## 📦 Install & Usage (Fork)
+
+This is a maintained fork of the original `nexus-fca` Messenger API, adapted for my **Chika Shirogane** bot and compatible with **GoatBot-V2** (with modified source).
+
+### Install directly from GitHub
+```bash
+npm install tas33n/nexus-fca
+```
+
+Or add to your `package.json`:
+```json
+"dependencies": {
+  "nexus-fca": "github:tas33n/nexus-fca"
+}
+```
+
+### Usage
+Import and use as you would the main module:
+```js
+const login = require('nexus-fca');
+(async () => {
+  const api = await login({ appState: require('./appstate.json') });
+  // ...
+})();
+```
+
+### About this fork
+- Based on the main [nexus-fca](https://github.com/Nexus-team/nexus-fca) source
+- Adapted for Chika Shirogane bot and GoatBot-V2 integration
+- Includes enhancements, async/await support, and compatibility fixes
+
+---
+---
 
 # Nexus-FCA v3.0.0 – Advanced Core Release
 

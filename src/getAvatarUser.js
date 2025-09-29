@@ -43,14 +43,32 @@ module.exports = function (defaultFuncs, api, ctx) {
   }
   
   return function getAvatarUser(userIDs, size = [1500, 1500], callback) {
-    let cb;
-    const rtPromise = new Promise(function (resolve, reject) {
-      cb = (err, res) => res ? resolve(res) : reject(err);
-    });
+    let resolveFunc;
+    let rejectFunc;
+    let promise = null;
+    if (typeof callback !== 'function') {
+      promise = new Promise((resolve, reject) => {
+        resolveFunc = resolve;
+        rejectFunc = reject;
+      });
+    }
+
     if (!Array.isArray(userIDs)) userIDs = [userIDs];
+
+    const resolver = (err, res) => {
+      if (typeof callback === 'function') {
+        callback(err, res);
+      }
+      if (promise) {
+        if (err) rejectFunc(err);
+        else resolveFunc(res);
+      }
+    };
+
     handleAvatar(userIDs, size[0], size[1])
-      .then(res => cb(null, res))
-      .catch(cb);
-    return rtPromise;
+      .then(res => resolver(null, res))
+      .catch(resolver);
+
+    return promise;
   };
 };
