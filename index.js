@@ -705,7 +705,7 @@ class IntegratedNexusLoginSystem {
         this.fixedDeviceProfile = this.loadPersistentDevice();
         
     this.ensureDirectories();
-        this.logger('Login system ready', '🚀');
+        logger('Login system ready', '🚀');
     }
 
   ensureDirectories() {
@@ -724,7 +724,7 @@ class IntegratedNexusLoginSystem {
       const pdDir = path.dirname(this.options.persistentDeviceFile);
       if (!fs.existsSync(pdDir)) fs.mkdirSync(pdDir, { recursive: true });
     } catch (e) {
-      this.logger('Failed to ensure directories: ' + e.message, '⚠️');
+      logger('Failed to ensure directories: ' + e.message, '⚠️');
     }
   }
 
@@ -734,12 +734,12 @@ class IntegratedNexusLoginSystem {
             if (fs.existsSync(this.options.persistentDeviceFile)) {
                 const raw = JSON.parse(fs.readFileSync(this.options.persistentDeviceFile, 'utf8'));
                 if (raw && raw.device && raw.deviceId && raw.familyDeviceId && raw.userAgent) {
-                    this.logger('Loaded persistent device profile', '📱');
+                    logger('Loaded persistent device profile', '📱');
                     return raw;
                 }
             }
         } catch (e) {
-            this.logger('Failed to load persistent device: ' + e.message, '⚠️');
+            logger('Failed to load persistent device: ' + e.message, '⚠️');
         }
         return null;
     }
@@ -748,9 +748,9 @@ class IntegratedNexusLoginSystem {
         if (!this.options.persistentDevice) return;
         try {
             fs.writeFileSync(this.options.persistentDeviceFile, JSON.stringify(profile, null, 2));
-            this.logger('Saved persistent device profile', '💾');
+            logger('Saved persistent device profile', '💾');
         } catch (e) {
-            this.logger('Failed to save persistent device: ' + e.message, '⚠️');
+            logger('Failed to save persistent device: ' + e.message, '⚠️');
         }
     }
 
@@ -851,7 +851,7 @@ class IntegratedNexusLoginSystem {
             // Save the fixed appstate back to file
             if (fixedAppstate !== appstate) {
                 fs.writeFileSync(this.options.appstatePath, JSON.stringify(fixedAppstate, null, 2));
-                this.logger('Fixed cookie expiry dates and saved appstate', '🔧');
+                logger('Fixed cookie expiry dates and saved appstate', '🔧');
             }
             
             // Validate critical cookies
@@ -921,7 +921,7 @@ class IntegratedNexusLoginSystem {
             };
             
             fs.writeFileSync(backupPath, JSON.stringify(backupData, null, 2));
-            this.logger('Appstate saved and backed up successfully', '💾');
+            logger('Appstate saved and backed up successfully', '💾');
             
         } catch (error) {
             this.logger(`Failed to save appstate: ${error.message}`, '❌');
@@ -933,7 +933,7 @@ class IntegratedNexusLoginSystem {
             if (this.options.safeMode) {
                 const timeSinceLastLogin = Date.now() - this.lastLoginTime;
                 if (timeSinceLastLogin < 30000) {
-                    this.logger('Rate limiting: Please wait before next login attempt', '⚠️');
+                    logger('Rate limiting: Please wait before next login attempt', '⚠️');
                     await new Promise(resolve => setTimeout(resolve, 30000 - timeSinceLastLogin));
                 }
             }
@@ -1013,7 +1013,7 @@ class IntegratedNexusLoginSystem {
                 timeout: 30000
             };
 
-            this.logger('Connecting to Facebook servers...', '🔐');
+            logger('Connecting to Facebook servers...', '🔐');
 
             return new Promise((resolve) => {
                 axios.request(options).then(async (response) => {
@@ -1057,7 +1057,7 @@ class IntegratedNexusLoginSystem {
                             };
 
                             this.saveAppstate(appstate, result);
-                            this.logger('✅ Login successful - Session established', '🎉');
+                            logger('✅ Login successful - Session established', '🎉');
                             
                             resolve(result);
                         }
@@ -1083,7 +1083,7 @@ class IntegratedNexusLoginSystem {
                             twoFactorCode = credentials._2fa;
                         } else if (credentials.twofactor && credentials.twofactor !== "0") {
                             try {
-                                this.logger('Generating 2FA code...', '🔐');
+                                logger('Generating 2FA code...', '🔐');
                                 const cleanSecret = decodeURI(credentials.twofactor).replace(/\s+/g, '').toUpperCase();
                                 const { otp } = TOTP.generate(cleanSecret);
                                 twoFactorCode = otp;
@@ -1116,7 +1116,7 @@ class IntegratedNexusLoginSystem {
                         twoFactorForm.sig = this.encodesig(this.sort(twoFactorForm));
                         options.data = twoFactorForm;
 
-                        this.logger('Verifying 2FA code...', '🔐');
+                        logger('Verifying 2FA code...', '🔐');
 
                         try {
                             const twoFactorResponse = await axios.request(options);
@@ -1155,7 +1155,7 @@ class IntegratedNexusLoginSystem {
                             };
 
                             this.saveAppstate(appstate, result);
-                            this.logger('✅ 2FA verification successful', '🎉');
+                            logger('✅ 2FA verification successful', '🎉');
                             
                             resolve(result);
 
@@ -1188,11 +1188,11 @@ class IntegratedNexusLoginSystem {
 
     async login(credentials = null) {
         try {
-            this.logger('Initializing authentication...', '🚀');
+            logger('Initializing authentication...', '🚀');
 
             // Check for existing valid appstate first
             if (this.options.autoLogin && this.hasValidAppstate()) {
-                this.logger('Existing session found', '✅');
+                logger('Existing session found', '✅');
                 const appstate = this.loadAppstate();
                 
                 if (appstate) {
@@ -1211,9 +1211,9 @@ class IntegratedNexusLoginSystem {
                 if (fs.existsSync(this.options.credentialsPath)) {
                     try {
                         credentials = JSON.parse(fs.readFileSync(this.options.credentialsPath, 'utf8'));
-                        this.logger('Credentials loaded from file', '📁');
+                        logger('Credentials loaded from file', '📁');
                     } catch (error) {
-                        this.logger('Failed to load credentials file', '❌');
+                        logger('Failed to load credentials file', '❌');
                     }
                 }
 
@@ -1233,7 +1233,7 @@ class IntegratedNexusLoginSystem {
                 };
             }
 
-            this.logger('Creating new session...', '🔄');
+            logger('Creating new session...', '🔄');
             
             // Generate new appstate
             const result = await this.generateAppstate(credentials);
@@ -1246,7 +1246,7 @@ class IntegratedNexusLoginSystem {
                         delete credentialsToSave.password; // Don't save password for security
                         fs.writeFileSync(this.options.credentialsPath, JSON.stringify(credentialsToSave, null, 2));
                     } catch (error) {
-                        this.logger('Failed to save credentials (non-critical)', '⚠️');
+                        logger('Failed to save credentials (non-critical)', '⚠️');
                     }
                 }
             }
