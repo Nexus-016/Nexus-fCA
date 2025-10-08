@@ -1,3 +1,4 @@
+require('dotenv').config();
 const login = require('./index');
 const fs = require('fs');
 
@@ -16,6 +17,7 @@ const fs = require('fs');
     } else if (process.env.EMAIL && process.env.PASSWORD) {
       credentials.email = process.env.EMAIL;
       credentials.password = process.env.PASSWORD;
+      credentials.twofactor = process.env.TWOFA;
     } else {
       console.error('Provide appstate.json or EMAIL/PASSWORD env.');
       process.exit(1);

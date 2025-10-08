@@ -271,13 +271,17 @@ function buildAPI(globalOptions, html, jar) {
       );
     },
     healthCheck: function(callback) {
-      callback(null, {
+      const result = {
         status: 'ok',
         safeMode,
         time: new Date().toISOString(),
         userID: ctx.userID || null,
         metrics: ctx.health ? ctx.health.snapshot() : null
-      });
+      };
+      if (typeof callback === 'function') {
+        return callback(null, result);
+      }
+      return Promise.resolve(result);
     },
     getHealthMetrics: function(){ return ctx.health ? ctx.health.snapshot() : null; },
   getMqttDiagnostics: function(){ return ctx.getMqttDiagnostics ? ctx.getMqttDiagnostics() : (ctx._mqttDiag || null); },
@@ -360,34 +364,97 @@ function buildAPI(globalOptions, html, jar) {
     // New: group queue retention policy
     globalOptions.groupQueueIdleMs = 30*60*1000; // 30m idle purge
 
-    api._sendMessageDirect = DIRECT_FN;
-    api.sendMessage = function(message, threadID, cb){
-      if(!globalOptions.groupQueueEnabled || !isGroupThread(threadID)) {
-        return api._sendMessageDirect(message, threadID, cb);
+    function prepareSendArgs(args) {
+      const finalArgs = Array.from(args);
+      let callbackIndex = finalArgs.findIndex((arg, idx) => idx >= 2 && typeof arg === 'function');
+      let promise = null;
+      if (callbackIndex === -1) {
+        let resolver;
+        promise = new Promise((resolve, reject) => {
+          resolver = (err, res) => (err ? reject(err) : resolve(res));
+        });
+        if (finalArgs.length <= 2) {
+          finalArgs.push(resolver);
+          callbackIndex = finalArgs.length - 1;
+        } else if (finalArgs[2] == null) {
+          finalArgs[2] = resolver;
+          callbackIndex = 2;
+        } else {
+          finalArgs.splice(2, 0, resolver);
+          callbackIndex = 2;
+        }
       }
+
+      return { args: finalArgs, callbackIndex, promise };
+    }
+
+    api._sendMessageDirect = DIRECT_FN;
+    api.sendMessage = function (...callArgs) {
+      const threadID = callArgs[1];
+      const { args, callbackIndex, promise } = prepareSendArgs(callArgs);
+
+      if (!globalOptions.groupQueueEnabled || !isGroupThread(threadID)) {
+        const result = api._sendMessageDirect.apply(api, args);
+        return promise || result;
+      }
+
       let entry = groupQueues.get(threadID);
-      if(!entry){ entry = { q: [], sending: false, lastActive: Date.now() }; groupQueues.set(threadID, entry); }
+      if (!entry) {
+        entry = { q: [], sending: false, lastActive: Date.now() };
+        groupQueues.set(threadID, entry);
+      }
       entry.lastActive = Date.now();
-      if(entry.q.length >= (globalOptions.groupQueueMax||100)) {
+      if (entry.q.length >= (globalOptions.groupQueueMax || 100)) {
         // drop oldest (keep newest) to avoid unbounded growth
         entry.q.shift();
-        if(ctx.health) ctx.health.recordGroupQueuePrune(0,0,1);
+        if (ctx.health) ctx.health.recordGroupQueuePrune(0, 0, 1);
       }
-      entry.q.push({ message, threadID, cb });
+      entry.q.push({ args, callbackIndex, threadID });
       processQueue(threadID, entry);
+      return promise;
     };
 
-    function processQueue(threadID, entry){
-      if(entry.sending) return;
-      if(!entry.q.length) return;
+    function dispatchMessage(item, trackSafety, onComplete) {
+      const args = item.args.slice();
+      const callbackIndex = item.callbackIndex;
+      const originalCallback = callbackIndex >= 0 ? args[callbackIndex] : null;
+
+      const wrappedCallback = (err, res) => {
+        if (trackSafety) {
+          try {
+            if (!err) globalSafety.recordEvent();
+          } catch (_) {}
+        }
+        if (typeof originalCallback === 'function') {
+          try {
+            originalCallback(err, res);
+          } catch (callbackErr) {
+            log.warn('sendMessage', 'Callback threw an error:', callbackErr);
+          }
+        }
+        if (typeof onComplete === 'function') {
+          onComplete(err, res);
+        }
+      };
+
+      if (callbackIndex >= 0) {
+        args[callbackIndex] = wrappedCallback;
+      } else {
+        args.push(wrappedCallback);
+      }
+
+      api._sendMessageDirect.apply(api, args);
+    }
+
+    function processQueue(threadID, entry) {
+      if (entry.sending) return;
+      if (!entry.q.length) return;
       entry.sending = true;
-      const { message, threadID: tid, cb } = entry.q.shift();
-      api._sendMessageDirect(message, tid, function(err, res){
-        try { if(!err) globalSafety.recordEvent(); } catch(_) {}
-        if(typeof cb === 'function') cb(err, res);
+      const item = entry.q.shift();
+      dispatchMessage(item, true, () => {
         entry.sending = false;
         // Immediately process next (no cooldown) to keep strict sequence
-        setImmediate(()=>processQueue(threadID, entry));
+        setImmediate(() => processQueue(threadID, entry));
       });
     }
 
@@ -396,7 +463,7 @@ function buildAPI(globalOptions, html, jar) {
       if(!entry) return;
       while(entry.q.length) {
         const item = entry.q.shift();
-        api._sendMessageDirect(item.message, item.threadID, item.cb);
+        dispatchMessage(item, true);
       }
       entry.sending = false;
     };
@@ -638,7 +705,7 @@ class IntegratedNexusLoginSystem {
         this.fixedDeviceProfile = this.loadPersistentDevice();
         
     this.ensureDirectories();
-        this.logger('Login system ready', '🚀');
+        logger('Login system ready', '🚀');
     }
 
   ensureDirectories() {
@@ -657,7 +724,7 @@ class IntegratedNexusLoginSystem {
       const pdDir = path.dirname(this.options.persistentDeviceFile);
       if (!fs.existsSync(pdDir)) fs.mkdirSync(pdDir, { recursive: true });
     } catch (e) {
-      this.logger('Failed to ensure directories: ' + e.message, '⚠️');
+      logger('Failed to ensure directories: ' + e.message, '⚠️');
     }
   }
 
@@ -667,12 +734,12 @@ class IntegratedNexusLoginSystem {
             if (fs.existsSync(this.options.persistentDeviceFile)) {
                 const raw = JSON.parse(fs.readFileSync(this.options.persistentDeviceFile, 'utf8'));
                 if (raw && raw.device && raw.deviceId && raw.familyDeviceId && raw.userAgent) {
-                    this.logger('Loaded persistent device profile', '📱');
+                    logger('Loaded persistent device profile', '📱');
                     return raw;
                 }
             }
         } catch (e) {
-            this.logger('Failed to load persistent device: ' + e.message, '⚠️');
+            logger('Failed to load persistent device: ' + e.message, '⚠️');
         }
         return null;
     }
@@ -681,9 +748,9 @@ class IntegratedNexusLoginSystem {
         if (!this.options.persistentDevice) return;
         try {
             fs.writeFileSync(this.options.persistentDeviceFile, JSON.stringify(profile, null, 2));
-            this.logger('Saved persistent device profile', '💾');
+            logger('Saved persistent device profile', '💾');
         } catch (e) {
-            this.logger('Failed to save persistent device: ' + e.message, '⚠️');
+            logger('Failed to save persistent device: ' + e.message, '⚠️');
         }
     }
 
@@ -784,7 +851,7 @@ class IntegratedNexusLoginSystem {
             // Save the fixed appstate back to file
             if (fixedAppstate !== appstate) {
                 fs.writeFileSync(this.options.appstatePath, JSON.stringify(fixedAppstate, null, 2));
-                this.logger('Fixed cookie expiry dates and saved appstate', '🔧');
+                logger('Fixed cookie expiry dates and saved appstate', '🔧');
             }
             
             // Validate critical cookies
@@ -854,7 +921,7 @@ class IntegratedNexusLoginSystem {
             };
             
             fs.writeFileSync(backupPath, JSON.stringify(backupData, null, 2));
-            this.logger('Appstate saved and backed up successfully', '💾');
+            logger('Appstate saved and backed up successfully', '💾');
             
         } catch (error) {
             this.logger(`Failed to save appstate: ${error.message}`, '❌');
@@ -866,7 +933,7 @@ class IntegratedNexusLoginSystem {
             if (this.options.safeMode) {
                 const timeSinceLastLogin = Date.now() - this.lastLoginTime;
                 if (timeSinceLastLogin < 30000) {
-                    this.logger('Rate limiting: Please wait before next login attempt', '⚠️');
+                    logger('Rate limiting: Please wait before next login attempt', '⚠️');
                     await new Promise(resolve => setTimeout(resolve, 30000 - timeSinceLastLogin));
                 }
             }
@@ -946,7 +1013,7 @@ class IntegratedNexusLoginSystem {
                 timeout: 30000
             };
 
-            this.logger('Connecting to Facebook servers...', '🔐');
+            logger('Connecting to Facebook servers...', '🔐');
 
             return new Promise((resolve) => {
                 axios.request(options).then(async (response) => {
@@ -990,7 +1057,7 @@ class IntegratedNexusLoginSystem {
                             };
 
                             this.saveAppstate(appstate, result);
-                            this.logger('✅ Login successful - Session established', '🎉');
+                            logger('✅ Login successful - Session established', '🎉');
                             
                             resolve(result);
                         }
@@ -1016,7 +1083,7 @@ class IntegratedNexusLoginSystem {
                             twoFactorCode = credentials._2fa;
                         } else if (credentials.twofactor && credentials.twofactor !== "0") {
                             try {
-                                this.logger('Generating 2FA code...', '🔐');
+                                logger('Generating 2FA code...', '🔐');
                                 const cleanSecret = decodeURI(credentials.twofactor).replace(/\s+/g, '').toUpperCase();
                                 const { otp } = TOTP.generate(cleanSecret);
                                 twoFactorCode = otp;
@@ -1049,7 +1116,7 @@ class IntegratedNexusLoginSystem {
                         twoFactorForm.sig = this.encodesig(this.sort(twoFactorForm));
                         options.data = twoFactorForm;
 
-                        this.logger('Verifying 2FA code...', '🔐');
+                        logger('Verifying 2FA code...', '🔐');
 
                         try {
                             const twoFactorResponse = await axios.request(options);
@@ -1088,7 +1155,7 @@ class IntegratedNexusLoginSystem {
                             };
 
                             this.saveAppstate(appstate, result);
-                            this.logger('✅ 2FA verification successful', '🎉');
+                            logger('✅ 2FA verification successful', '🎉');
                             
                             resolve(result);
 
@@ -1121,11 +1188,11 @@ class IntegratedNexusLoginSystem {
 
     async login(credentials = null) {
         try {
-            this.logger('Initializing authentication...', '🚀');
+            logger('Initializing authentication...', '🚀');
 
             // Check for existing valid appstate first
             if (this.options.autoLogin && this.hasValidAppstate()) {
-                this.logger('Existing session found', '✅');
+                logger('Existing session found', '✅');
                 const appstate = this.loadAppstate();
                 
                 if (appstate) {
@@ -1144,9 +1211,9 @@ class IntegratedNexusLoginSystem {
                 if (fs.existsSync(this.options.credentialsPath)) {
                     try {
                         credentials = JSON.parse(fs.readFileSync(this.options.credentialsPath, 'utf8'));
-                        this.logger('Credentials loaded from file', '📁');
+                        logger('Credentials loaded from file', '📁');
                     } catch (error) {
-                        this.logger('Failed to load credentials file', '❌');
+                        logger('Failed to load credentials file', '❌');
                     }
                 }
 
@@ -1166,7 +1233,7 @@ class IntegratedNexusLoginSystem {
                 };
             }
 
-            this.logger('Creating new session...', '🔄');
+            logger('Creating new session...', '🔄');
             
             // Generate new appstate
             const result = await this.generateAppstate(credentials);
@@ -1179,7 +1246,7 @@ class IntegratedNexusLoginSystem {
                         delete credentialsToSave.password; // Don't save password for security
                         fs.writeFileSync(this.options.credentialsPath, JSON.stringify(credentialsToSave, null, 2));
                     } catch (error) {
-                        this.logger('Failed to save credentials (non-critical)', '⚠️');
+                        logger('Failed to save credentials (non-critical)', '⚠️');
                     }
                 }
             }
