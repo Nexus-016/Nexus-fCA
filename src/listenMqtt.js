@@ -42,13 +42,17 @@ let WebSocket_Global;
 // Adaptive backoff state (per-process singleton like) - tie to ctx
 function getBackoffState(ctx){
   if(!ctx._adaptiveReconnect){
+    const envBase = parseInt(process.env.NEXUS_MQTT_BACKOFF_BASE, 10) || 1000;
+    const envMax = parseInt(process.env.NEXUS_MQTT_BACKOFF_MAX, 10) || (5 * 60 * 1000);
+    const envFactor = parseFloat(process.env.NEXUS_MQTT_BACKOFF_FACTOR) || 2;
     ctx._adaptiveReconnect = {
-      base: 1000,          // 1s
-      max: 5 * 60 * 1000,  // 5m
-      factor: 2,
+      base: envBase,          // 1s default
+      max: envMax,  // 5m default
+      factor: envFactor,
       jitter: 0.25,        // 25% random
       current: 0,
-      lastResetTs: 0
+      lastResetTs: 0,
+      consecutiveFails: 0  // Track consecutive failures
     };
   }
   return ctx._adaptiveReconnect;
@@ -146,18 +150,28 @@ function buildStream(options, WebSocket, Proxy) {
     Stream.setReadable(Proxy);
     Stream.setWritable(Proxy);
     Stream.emit("connect");
+    // Configurable ping interval for better connection stability
+    const pingMs = parseInt(process.env.NEXUS_MQTT_PING_INTERVAL, 10) || 30000;
     pingInterval = setInterval(() => {
       if (WebSocket.readyState === WebSocket.OPEN) {
-        WebSocket.ping();
+        try {
+          WebSocket.ping();
+        } catch(pingErr) {
+          // Ping failed, connection likely dead
+          clearTimers();
+          WebSocket.close();
+        }
       }
-    }, 30000);
+    }, pingMs);
+    // Extended timeout for long-running stability (5 minutes instead of 1 minute)
+    const reconnectMs = parseInt(process.env.NEXUS_MQTT_RECONNECT_TIMEOUT, 10) || 300000;
     reconnectTimeout = setTimeout(() => {
       if (WebSocket.readyState === WebSocket.OPEN) {
         WebSocket.close();
         Stream.end();
         Stream.destroy();
       }
-    }, 60000);
+    }, reconnectMs);
   };
   WebSocket_Global = WebSocket;
   Proxy.on("close", () => {
@@ -185,7 +199,25 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     (async () => {
       try {
         await utils.validateSession(ctx, defaultFuncs, { retries: 1, delayMs: 1000 });
+        // Session validated successfully
+        if(backoff.consecutiveFails > 0) {
+          log.info("listenMqtt", `Session validated OK after ${backoff.consecutiveFails} previous fails, resetting backoff.`);
+          backoff.consecutiveFails = 0;
+        }
       } catch (e) {
+        backoff.consecutiveFails++;
+        log.warn("listenMqtt", `Session validation failed (consecutive fails: ${backoff.consecutiveFails})`);
+        
+        // After many consecutive failures, try proactive cookie refresh
+        if(backoff.consecutiveFails >= 10 && global.__NEXUS_COOKIE_REFRESHER__) {
+          try {
+            log.info("listenMqtt", "Triggering proactive cookie refresh after repeated session failures...");
+            await global.__NEXUS_COOKIE_REFRESHER__.performRefresh();
+          } catch(refreshErr) {
+            log.warn("listenMqtt", `Cookie refresh failed: ${refreshErr.message}`);
+          }
+        }
+        
         setTimeout(() => {
           utils.validateSession(ctx, defaultFuncs, { retries: 0 }).catch(err2 => {
             log.error("listenMqtt", "Session invalid after retry: Not logged in.");
@@ -337,6 +369,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   });
   mqttClient.on("connect", function () {
     resetBackoff(backoff);
+    backoff.consecutiveFails = 0;  // Reset consecutive failures on successful connect
     ctx.health.onConnect();
   if (verboseMqtt) {
     log.info('listenMqtt', `Nexus MQTT bridge established in ${(Date.now()-attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);

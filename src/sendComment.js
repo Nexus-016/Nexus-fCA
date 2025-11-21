@@ -58,6 +58,6 @@ module.exports = function (defaultFuncs, api, ctx) {
   }
 
   return function sendComment(postID, message, callback) {
-    // ...existing code from ws3-fca-main (DEMO CODE)/src/sendComment.js...
+    // Implementation placeholder - to be completed
   };
 };

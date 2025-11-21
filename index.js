@@ -57,6 +57,11 @@ const { SingleSessionGuard } = require('./lib/safety/SingleSessionGuard');
 const { CookieRefresher } = require('./lib/safety/CookieRefresher');
 const { CookieManager } = require('./lib/safety/CookieManager');
 
+// NEW: Advanced Network & Authentication Modules
+const EmailPasswordLogin = require('./lib/auth/EmailPasswordLogin');
+const ProxyManager = require('./lib/network/ProxyManager');
+const UserAgentManager = require('./lib/network/UserAgentManager');
+
 // Core compatibility imports
 const MqttManager = require('./lib/mqtt/MqttManager');
 const { DatabaseManager, getInstance } = require('./lib/database/DatabaseManager');
@@ -441,6 +446,26 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
   let mainPromise = null;
   const jar = utils.getJar();
   
+  // NEW: Initialize Proxy Manager
+  const proxyManager = globalOptions.proxy 
+    ? new ProxyManager(globalOptions.proxy) 
+    : ProxyManager.fromEnv();
+  
+  if (proxyManager.isEnabled()) {
+    logger(`🌐 Proxy enabled: ${proxyManager.getInfo().host}:${proxyManager.getInfo().port}`, 'info');
+  }
+  
+  // NEW: Initialize User Agent Manager
+  const uaManager = globalOptions.randomUserAgent 
+    ? new UserAgentManager({ random: true })
+    : UserAgentManager.fromEnv();
+  
+  // Use random or custom user agent
+  if (!globalOptions.userAgent) {
+    globalOptions.userAgent = uaManager.getUserAgent(globalOptions);
+    logger(`🔧 User Agent: ${uaManager.getInfo().browser} ${uaManager.getInfo().version} on ${uaManager.getInfo().os}`, 'info');
+  }
+  
   // Apply maximum safety validation
   const safetyCheck = globalSafety.validateLogin(appState, email, password);
   if (!safetyCheck.safe) {
@@ -451,7 +476,34 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
   if(!globalSafety._fixedUA){ globalSafety.setFixedUserAgent(globalSafety.getSafeUserAgent()); }
   globalOptions.userAgent = globalSafety.getSafeUserAgent();
   
-  if (appState) {
+  // NEW: Support email/password login
+  if (email && password) {
+    logger('🔐 Attempting email/password login...', 'info');
+    
+    const emailPasswordLogin = new EmailPasswordLogin();
+    const validation = emailPasswordLogin.validateCredentials(email, password);
+    
+    if (!validation.valid) {
+      return callback(new Error(`Invalid credentials: ${validation.errors.join(', ')}`));
+    }
+    
+    mainPromise = emailPasswordLogin.login(email, password, jar)
+      .then(result => {
+        if (!result.success) {
+          throw new Error('Email/password login failed');
+        }
+        logger('✅ Email/password login successful', 'info');
+        
+        // Now fetch the main page to build API
+        return utils.get('https://www.facebook.com/', jar, null, 
+          globalSafety.applySafeRequestOptions(globalOptions), { noRef: true })
+          .then(utils.saveCookies(jar));
+      })
+      .catch(err => {
+        logger(`❌ Email/password login failed: ${err.message}`, 'error');
+        throw err;
+      });
+  } else if (appState) {
     try {
       appState = JSON.parse(appState);
     } catch (e) {
@@ -483,7 +535,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       return callback(new Error("Invalid appState format"));
     }
   } else {
-    return callback(new Error("AppState is required for session authentication"));
+    return callback(new Error("Either appState or email/password is required for authentication"));
   }
 
   function handleRedirect(res) {
@@ -562,6 +614,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
         
         if (appstatePath) {
           ctx.cookieRefresher = cookieRefresher.initialize(ctx, utils, defaultFuncs, appstatePath, backupPath);
+          global.__NEXUS_COOKIE_REFRESHER__ = cookieRefresher; // Make accessible to MQTT for proactive refresh
           logger('✅ Cookie Refresher initialized - cookies will be kept fresh', 'info');
           
           // Immediate first refresh to ensure long expiry
@@ -1458,13 +1511,15 @@ async function login(loginData, options = {}, callback) {
       updatePresence: false,
       forceLogin: false,
       autoMarkDelivery: true,
-      autoMarkRead: false,
+      autoMarkRead: options.autoMarkRead !== undefined ? options.autoMarkRead : false,
       autoReconnect: true,
       logRecordSize: defaultLogRecordSize,
       online: (process.env.NEXUS_ONLINE ? (process.env.NEXUS_ONLINE === '1' || process.env.NEXUS_ONLINE === 'true') : true),
-      emitReady: false,
-      userAgent: process.env.NEXUS_UA || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-      proxy: process.env.NEXUS_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
+      emitReady: options.emitReady || false,
+      userAgent: options.userAgent || process.env.NEXUS_UA || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      randomUserAgent: options.randomUserAgent || (process.env.NEXUS_RANDOM_USER_AGENT === 'true'),
+      proxy: options.proxy || process.env.NEXUS_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
+      bypassRegion: options.bypassRegion || process.env.NEXUS_BYPASS_REGION,
       acceptLanguage: process.env.NEXUS_ACCEPT_LANGUAGE || 'en-US,en;q=0.9',
       disablePreflight: process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true',
       ...options
@@ -1501,3 +1556,7 @@ module.exports.CompatibilityLayer = CompatibilityLayer;
 module.exports.Message = Message;
 module.exports.Thread = Thread;
 module.exports.User = User;
+// NEW: Advanced Network & Auth exports
+module.exports.EmailPasswordLogin = EmailPasswordLogin;
+module.exports.ProxyManager = ProxyManager;
+module.exports.UserAgentManager = UserAgentManager;

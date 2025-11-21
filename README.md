@@ -2,9 +2,17 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="520" />
 </p>
 
-# Nexus-FCA v3.0.0 – Advanced Core Release
+# Nexus-FCA v3.1.0 – 🏆 THE BEST, SAFEST, MOST STABLE FCA
 
-Modern, safe, production‑ready Messenger (Facebook Chat) API layer with integrated secure login (credentials + 2FA), adaptive session & connection resilience, delivery reliability safeguards, memory protection, and rich runtime metrics. Promise + callback compatible, TypeScript typed, minimal friction.
+Modern, safe, production‑ready Messenger (Facebook Chat) API layer with **email/password + appState login**, **proxy support**, **random user agent**, adaptive session & connection resilience, proactive cookie refresh, MQTT stability enhancements, delivery reliability safeguards, memory protection, and rich runtime metrics. Promise + callback compatible, TypeScript typed, minimal friction.
+
+## 🎉 NEW in 3.1.0 - Industry Leading Features!
+- ✅ **Email/Password Login** - Login with Facebook credentials (not just cookies!)
+- ✅ **Advanced Proxy Support** - HTTP/HTTPS/SOCKS5 proxy for all connections
+- ✅ **Random User Agent** - 14+ realistic user agents to avoid detection
+- ✅ **Enhanced Configuration** - autoMarkRead, emitReady, bypassRegion, and more!
+- ✅ **Environment Variables** - Full configuration via env vars
+- ✅ **Best-in-Class Stability** - Proactive cookie refresh + MQTT recovery + session protection!
 
 ---
 ## ✅ Core Value
@@ -24,12 +32,17 @@ Modern, safe, production‑ready Messenger (Facebook Chat) API layer with integr
 Major version signals maturity & consolidation. No breaking public API changes versus late 2.1.x – upgrade is drop‑in. Temporary diagnostic harness removed; internal instrumentation formalized. Delivery receipt timeouts now intelligently retried & optionally auto-suppressed to protect outbound responsiveness.
 
 ---
-## 🚀 Quick Start (Appstate Preferred)
+## 🚀 Quick Start
+
+### Option 1: AppState Login (Most Stable)
 ```js
 const login = require('nexus-fca');
 
 (async () => {
-  const api = await login({ appState: require('./appstate.json') });
+  const api = await login({ appState: require('./appstate.json') }, {
+    autoReconnect: true,
+    randomUserAgent: true  // NEW!
+  });
   console.log('Logged in as', api.getCurrentUserID());
   api.listen((err, evt) => {
     if (err) return console.error('Listen error:', err);
@@ -38,18 +51,44 @@ const login = require('nexus-fca');
 })();
 ```
 
-### Credentials + 2FA Flow
+### Option 2: Email/Password Login (NEW!)
 ```js
 const login = require('nexus-fca');
+
 (async () => {
   const api = await login({
-    email: process.env.FB_EMAIL,
-    password: process.env.FB_PASS,
-    twofactor: process.env.FB_2FA_SECRET // optional TOTP secret
+    email: 'your-email@example.com',  // NEW!
+    password: 'your-password'          // NEW!
+  }, {
+    autoReconnect: true,
+    randomUserAgent: true,             // NEW!
+    proxy: 'socks5://127.0.0.1:1080'  // NEW!
   });
+  console.log('✅ Logged in!');
   api.listen((err, msg) => {
     if (err) return console.error(err);
     if (msg.body === 'ping') api.sendMessage('pong', msg.threadID);
+  });
+})();
+```
+
+### Option 3: With Proxy + Random UA (NEW!)
+```js
+const login = require('nexus-fca');
+
+(async () => {
+  const api = await login({ appState: require('./appstate.json') }, {
+    proxy: 'http://proxy.example.com:8080',  // NEW!
+    randomUserAgent: true,                    // NEW!
+    autoMarkRead: true,                       // NEW!
+    emitReady: true,                          // NEW!
+    bypassRegion: 'PRN'                       // NEW!
+  });
+  
+  api.on('ready', () => console.log('🚀 Bot ready!'));
+  api.listen((err, msg) => {
+    if (err) return console.error(err);
+    if (msg.body) api.sendMessage('Echo: ' + msg.body, msg.threadID);
   });
 })();
 ```

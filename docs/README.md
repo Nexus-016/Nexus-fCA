@@ -27,7 +27,6 @@ Additional references:
 
 ### 🔗 Migration Guides
 - **[Migration-fca-unofficial.md](./Migration-fca-unofficial.md)** - Migrate from fca-unofficial
-- **[Migration-ws3-fca.md](./Migration-ws3-fca.md)** - Migrate from ws3-fca  
 - **[Migration-fca-utils.md](./Migration-fca-utils.md)** - Migrate from fca-utils
 
 ### 📖 Additional Resources
