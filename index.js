@@ -76,7 +76,7 @@ const globalSafety = new FacebookSafety({
   enableLoginValidation: true,
   enableSafeDelays: true, // Human-like delays to reduce detection
   bypassRegionLock: true,
-  ultraLowBanMode: ultraSafeMode // Ultra-low ban rate mode
+  ultraLowBanMode: true // FORCED ULTRA-SAFE MODE for maximum protection
 });
 
 let checkVerified = null;
@@ -304,6 +304,36 @@ function buildAPI(globalOptions, html, jar) {
     }
   };
   const defaultFuncs = utils.makeDefaults(html, i_userID || userID, ctx);
+  
+  // ULTRA-SAFE WRAPPER: Throttle ALL API calls, not just sendMessage
+  const originalPost = defaultFuncs.post;
+  const originalPostFormData = defaultFuncs.postFormData;
+  const originalGet = defaultFuncs.get;
+
+  defaultFuncs.post = async function(...args) {
+    if (globalSafety && typeof globalSafety.applyAdaptiveSendDelay === 'function') {
+        await globalSafety.applyAdaptiveSendDelay();
+    }
+    return originalPost.apply(this, args);
+  };
+
+  defaultFuncs.postFormData = async function(...args) {
+    if (globalSafety && typeof globalSafety.applyAdaptiveSendDelay === 'function') {
+        await globalSafety.applyAdaptiveSendDelay();
+    }
+    return originalPostFormData.apply(this, args);
+  };
+  
+  // We don't throttle GET as much, but maybe a little? 
+  // Actually, let's throttle everything for "Most Safe" mode.
+  defaultFuncs.get = async function(...args) {
+     if (globalSafety && typeof globalSafety.applyAdaptiveSendDelay === 'function') {
+        // Use a lighter delay for GETs if needed, but for now use the same safe pipeline
+        await globalSafety.applyAdaptiveSendDelay();
+    }
+    return originalGet.apply(this, args);
+  };
+
   require("fs")
     .readdirSync(__dirname + "/src/")
     .filter((v) => v.endsWith(".js"))
