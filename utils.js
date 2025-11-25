@@ -2,9 +2,15 @@
 var url = require("url");
 const log = require("npmlog");
 const stream = require("stream");
-const bluebird = require("bluebird");
 const querystring = require("querystring");
-const request = bluebird.promisify(require("request").defaults({ jar: true }));
+const got = require("got");
+const { CookieJar } = require("tough-cookie");
+const FormData = require("form-data");
+const { HttpProxyAgent } = require("http-proxy-agent");
+const { HttpsProxyAgent } = require("https-proxy-agent");
+const { SocksProxyAgent } = require("socks-proxy-agent");
+
+let globalProxy;
 
 class CustomError extends Error {
     constructor(obj) {
@@ -32,20 +38,71 @@ function delay(ms) {
 }
 
 function setProxy(url) {
-    if (typeof url == "undefined") return request = bluebird.promisify(require("request").defaults({ jar: true }));
-    return request = bluebird.promisify(require("request").defaults({ jar: true, proxy: url }));
+    globalProxy = url;
+}
+
+function getAgent(url) {
+    if (!globalProxy) return undefined;
+    if (globalProxy.startsWith('socks')) {
+        const agent = new SocksProxyAgent(globalProxy);
+        return {
+            http: agent,
+            https: agent
+        };
+    }
+    return {
+        http: new HttpProxyAgent(globalProxy),
+        https: new HttpsProxyAgent(globalProxy)
+    };
+}
+
+function getJar() {
+    const jar = new CookieJar();
+    const originalSetCookie = jar.setCookie;
+    
+    jar.setCookie = function(cookieOrStr, uri, options, callback) {
+        if (typeof options === 'function') {
+            callback = options;
+            options = {};
+        }
+        if (callback) {
+            return originalSetCookie.call(jar, cookieOrStr, uri, options, callback);
+        }
+        return jar.setCookieSync(cookieOrStr, uri, options || {});
+    };
+    
+    const originalGetCookies = jar.getCookies;
+    jar.getCookies = function(uri, options, callback) {
+         if (typeof options === 'function') {
+            callback = options;
+            options = {};
+        }
+        if (callback) {
+            return originalGetCookies.call(jar, uri, options, callback);
+        }
+        return jar.getCookiesSync(uri, options || {});
+    }
+
+    return jar;
 }
 
 function getHeaders(url, options, ctx, customHeader) {
     var headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
         Referer: "https://www.facebook.com/",
         Host: url.replace("https://", "").split("/")[0],
         Origin: "https://www.facebook.com",
-        "user-agent": (options?.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.114 Safari/537.36"),
+        "user-agent": (options?.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
         Connection: "keep-alive",
         "sec-fetch-site": 'same-origin',
-        "sec-fetch-mode": 'cors'
+        "sec-fetch-mode": 'cors',
+        "sec-fetch-dest": "empty",
+        "accept": "*/*",
+        "accept-language": "en-US,en;q=0.9",
+        "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "dnt": "1",
+        "upgrade-insecure-requests": "1"
     };
     if (customHeader) Object.assign(headers, customHeader);
     if (ctx && ctx.region) headers["X-MSGR-Region"] = ctx.region;
@@ -62,69 +119,122 @@ function isReadableStream(obj) {
     );
 }
 
-function get(url, jar, qs, options, ctx) {
+function cleanObject(obj) {
+    if (getType(obj) !== "Object") return obj;
+    const newObj = {};
+    for (const key in obj) {
+        if (obj[key] !== null && obj[key] !== undefined) {
+            newObj[key] = obj[key];
+        }
+    }
+    return newObj;
+}
+
+async function get(url, jar, qs, options, ctx) {
     if (getType(qs) === "Object")
         for (var prop in qs)
             if (qs.hasOwnProperty(prop) && getType(qs[prop]) === "Object") qs[prop] = JSON.stringify(qs[prop]);
     var op = {
         headers: getHeaders(url, options, ctx),
         timeout: 60000,
-        qs: qs,
-        url: url,
         method: "GET",
-        jar: jar,
-        gzip: true
+        cookieJar: jar,
+        throwHttpErrors: false,
+        decompress: true,
+        agent: getAgent(url)
     };
-    return request(op).then(function (res) {
+    if (qs) op.searchParams = cleanObject(qs);
+
+    return got(url, op).then(function (res) {
         return res;
     });
 }
 
-function get2(url, jar, headers, options, ctx) {
+async function get2(url, jar, headers, options, ctx) {
     var op = {
         headers: getHeaders(url, options, ctx, headers),
         timeout: 60000,
-        url: url,
         method: "GET",
-        jar: jar,
-        gzip: true,
+        cookieJar: jar,
+        throwHttpErrors: false,
+        decompress: true,
+        agent: getAgent(url)
     };
 
-    return request(op).then(function (res) {
-        return res[0];
-    });
-}
-
-function post(url, jar, form, options, ctx, customHeader) {
-    var op = {
-        headers: getHeaders(url, options),
-        timeout: 60000,
-        url: url,
-        method: "POST",
-        form: form,
-        jar: jar,
-        gzip: true
-    };
-    return request(op).then(function (res) {
+    return got(url, op).then(function (res) {
         return res;
     });
 }
 
-function postFormData(url, jar, form, qs, options, ctx) {
-    var headers = getHeaders(url, options, ctx);
-    headers["Content-Type"] = "multipart/form-data";
+async function post(url, jar, form, options, ctx, customHeader) {
+    var headers = getHeaders(url, options, ctx, customHeader);
     var op = {
         headers: headers,
         timeout: 60000,
-        url: url,
         method: "POST",
-        formData: form,
-        qs: qs,
-        jar: jar,
-        gzip: true
+        cookieJar: jar,
+        throwHttpErrors: false,
+        decompress: true,
+        agent: getAgent(url)
     };
 
-    return request(op).then(function (res) {
+    // Manual body construction to match ws3-fca / request behavior
+    if (form) {
+        // 1. Clean null/undefined
+        form = cleanObject(form);
+        
+        // 2. Check Content-Type
+        let contentType = headers['Content-Type'] || 'application/x-www-form-urlencoded';
+        
+        if (contentType.includes('json')) {
+            op.body = JSON.stringify(form);
+        } else {
+            // 3. Transform to URLSearchParams (application/x-www-form-urlencoded)
+            // We use URLSearchParams to ensure correct encoding
+            const params = new URLSearchParams();
+            for (const key in form) {
+                if (form.hasOwnProperty(key)) {
+                    let value = form[key];
+                    // Stringify nested objects (but not Arrays, unless ws3-fca does? ws3-fca checks getType(value) === "Object")
+                    if (getType(value) === "Object") {
+                        value = JSON.stringify(value);
+                    }
+                    params.append(key, value);
+                }
+            }
+            op.body = params.toString();
+        }
+        // CRITICAL: Explicitly set Content-Type because 'got' won't do it for manual 'body'
+        headers['Content-Type'] = contentType;
+    }
+
+    return got(url, op).then(function (res) {
+        return res;
+    });
+}
+
+async function postFormData(url, jar, form, qs, options, ctx) {
+    var headers = getHeaders(url, options, ctx);
+    const body = new FormData();
+    form = cleanObject(form);
+    for (const key in form) {
+        body.append(key, form[key]);
+    }
+    Object.assign(headers, body.getHeaders());
+
+    var op = {
+        headers: headers,
+        timeout: 60000,
+        method: "POST",
+        body: body,
+        cookieJar: jar,
+        throwHttpErrors: false,
+        decompress: true,
+        agent: getAgent(url)
+    };
+    if (qs) op.searchParams = cleanObject(qs);
+
+    return got(url, op).then(function (res) {
         return res;
     });
 }
@@ -253,22 +363,6 @@ function generatePresence(userID) {
                 }
             })
         )
-    );
-}
-
-function generateAccessiblityCookie() {
-    var time = Date.now();
-    return encodeURIComponent(
-        JSON.stringify({
-            sr: 0,
-            "sr-ts": time,
-            jk: 0,
-            "jk-ts": time,
-            kb: 0,
-            "kb-ts": time,
-            hcm: 0,
-            "hcm-ts": time
-        })
     );
 }
 
@@ -943,9 +1037,36 @@ function generateTimestampRelative() {
 
 function makeDefaults(html, userID, ctx) {
     var reqCounter = 1;
-    const fb_dtsg = getFrom(html, '"DTSGInitData",[],{"token":"', '",');
+    let fb_dtsg = null;
+    
+    // Robust fb_dtsg extraction
+    const dtsgRegexes = [
+        /"DTSGInitData",\[\],{"token":"(.*?)"/,
+        /"DTSGInitialData",\[\],{"token":"(.*?)"/,
+        /DTSGInitialData.*?token":"(.*?)"/,
+        /\["DTSGInitData",\[\],{"token":"(.*?)"/,
+        /name="fb_dtsg" value="(.*?)"/,
+        /name="dtsg_ag" value="(.*?)"/
+    ];
+    
+    for (const regex of dtsgRegexes) {
+        const match = html.match(regex);
+        if (match && match[1]) {
+            fb_dtsg = match[1];
+            break;
+        }
+    }
+    
+    // Fallback to ctx if not found in HTML (or if HTML is partial)
+    if (!fb_dtsg && ctx.fb_dtsg) {
+        fb_dtsg = ctx.fb_dtsg;
+    }
+
     var ttstamp = "2";
-    for (var i = 0; i < fb_dtsg.length; i++) ttstamp += fb_dtsg.charCodeAt(i);
+    if (fb_dtsg) {
+        for (var i = 0; i < fb_dtsg.length; i++) ttstamp += fb_dtsg.charCodeAt(i);
+    }
+    
     var revision = getFrom(html, 'revision":', ",");
     function mergeWithDefaults(obj) {
         var newObj = {
@@ -989,6 +1110,14 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
     return function (data) {
         return tryPromise(function () {
             log.verbose("parseAndCheckLogin", data.body);
+            
+            // GOT compatibility: map request properties
+            const request = data.request;
+            const requestUrl = request.options ? request.options.url : request.uri;
+            const requestMethod = request.options ? request.options.method : request.method;
+            const requestHeaders = request.options ? request.options.headers : request.headers;
+            const requestBody = request.options ? (request.options.form || request.options.body) : (request.formData || request.form);
+
             // --- Handle HTTP 5xx with bounded retry (existing logic) ---
             if (data.statusCode >= 500 && data.statusCode < 600) {
                 if (retryCount >= 5) {
@@ -1006,14 +1135,15 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
                     "parseAndCheckLogin",
                     `Got status code ${data.statusCode} - Retrying in ${retryTime}ms...`
                 );
-                if (!data.request) throw new Error("Invalid request object");
-                const url = `${data.request.uri.protocol}//${data.request.uri.hostname}${data.request.uri.pathname}`;
-                const contentType = data.request.headers?.["content-type"]?.split(";")[0];
+                
+                const url = requestUrl.toString();
+                const contentType = requestHeaders?.["content-type"]?.split(";")[0];
+                
                 return delay(retryTime)
                     .then(() =>
                         contentType === "multipart/form-data"
-                            ? defaultFuncs.postFormData(url, ctx.jar, data.request.formData, {})
-                            : defaultFuncs.post(url, ctx.jar, data.request.formData)
+                            ? defaultFuncs.postFormData(url, ctx.jar, requestBody, {})
+                            : defaultFuncs.post(url, ctx.jar, requestBody)
                     )
                     .then(parseAndCheckLogin(ctx, defaultFuncs, retryCount, sourceCall));
             }
@@ -1091,7 +1221,7 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
                     sourceCall
                 };
             }
-            if (res.redirect && data.request.method === "GET") {
+            if (res.redirect && requestMethod === "GET") {
                 // New: classify redirect target
                 if (/checkpoint|login/i.test(res.redirect)) {
                     throw {
@@ -1130,26 +1260,13 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
             }
             // --- New: Detect common not-logged-in payload patterns ---
             if (res.error === 1357001 || res.error === 1357004 || res.errorSummary === "login required") {
-                // 1357001 existing logic below triggers auto_login; keep classification
-                if (!ctx.auto_login) {
-                    ctx.auto_login = true;
-                    auto_login(success => {
-                        if (success) {
-                            log.info("Auto login successful! Retrying...");
-                            ctx.auto_login = false;
-                            process.exit(1);
-                        } else {
-                            ctx.auto_login = false;
-                            throw {
-                                message: "Facebook blocked login. Please check your account.",
-                                error: "Not logged in.",
-                                res,
-                                statusCode: data.statusCode,
-                                sourceCall
-                            };
-                        }
-                    });
-                }
+                throw {
+                    message: "Facebook blocked login. Please check your account or re-login.",
+                    error: "Not logged in.",
+                    res,
+                    statusCode: data.statusCode,
+                    sourceCall
+                };
             }
             return res;
         });
@@ -1159,9 +1276,17 @@ function saveCookies(jar) {
     return function (res) {
         var cookies = res.headers["set-cookie"] || [];
         cookies.forEach(function (c) {
-            if (c.indexOf(".facebook.com") > -1) {
-                jar.setCookie(c, "https://www.facebook.com");
-                jar.setCookie(c.replace(/domain=\.facebook\.com/, "domain=.messenger.com"), "https://www.messenger.com");
+            if (c.indexOf(".facebook.com") > -1 || c.indexOf("facebook.com") > -1) {
+                try {
+                    jar.setCookie(c, "https://www.facebook.com");
+                } catch (e) {}
+                
+                try {
+                    var c_messenger = c.replace(/domain=\.?facebook\.com/i, "domain=.messenger.com");
+                    if (c_messenger.indexOf(".messenger.com") > -1) {
+                        jar.setCookie(c_messenger, "https://www.messenger.com");
+                    }
+                } catch (e) {}
             }
         });
         return res;
@@ -1390,20 +1515,6 @@ function checkLiveCookie(ctx, defaultFuncs) {
     });
 }
 
-function getAccessFromBusiness(jar, Options) {
-    return function (res) {
-        var html = res ? res.body : null;
-        return get('https://business.facebook.com/content_management', jar, null, Options, null, { noRef: true })
-            .then(function (res) {
-                var token = /"accessToken":"([^.]+)","clientID":/g.exec(res.body)[1];
-                return [html, token];
-            })
-            .catch(function () {
-                return [html, null];
-            });
-    }
-}
-
 // --- Nexus-FCA Advanced Safety Utilities ---
 
 /**
@@ -1436,10 +1547,10 @@ const smartSafetyLimiter = {
     const timeSinceLastActivity = Date.now() - session.lastActivity;
     const errorRate = session.errorCount / Math.max(1, session.requestCount);
     
-    // Update risk level based on activity patterns
-    if (errorRate > 0.3 || timeSinceLastActivity < 1000) {
+    // Update risk level based on activity patterns - ULTRA SAFE TUNING
+    if (errorRate > 0.2 || timeSinceLastActivity < 800) { // Stricter error threshold (0.2 vs 0.3)
       session.riskLevel = 'high';
-    } else if (errorRate > 0.1 || timeSinceLastActivity < 3000) {
+    } else if (errorRate > 0.05 || timeSinceLastActivity < 2000) { // Stricter medium threshold
       session.riskLevel = 'medium';
     } else {
       session.riskLevel = 'low';
@@ -1625,6 +1736,18 @@ async function validateSession(ctx, defaultFuncs, opts = {}) {
     throw new CustomError({ message: 'Unknown session validation failure', type: 'not_logged_in' });
 }
 
+// --- Advanced Feature: Dynamic DocID Fetching ---
+async function getLatestDocIDs(api) {
+    // This is a placeholder for a future feature that dynamically fetches
+    // the latest GraphQL DocIDs from Facebook's source code.
+    // For now, it returns the known stable IDs.
+    return {
+        "getThreadList": "8805201422847259",
+        "getThreadInfo": "8805201422847259", // Updated 2025
+        "sendMessage": "8805201422847259"
+    };
+}
+
 // Preserve earlier named exports while adding validateSession
 module.exports = {
     CustomError,
@@ -1641,7 +1764,7 @@ module.exports = {
     makeParsable: makeParsable,
     arrToForm: arrToForm,
     getSignatureID: getSignatureID,
-    getJar: request.jar,
+    getJar: getJar,
     generateTimestampRelative: generateTimestampRelative,
     makeDefaults: makeDefaults,
     parseAndCheckLogin: parseAndCheckLogin,
@@ -1665,14 +1788,12 @@ module.exports = {
     formatReadReceipt,
     formatRead,
     generatePresence,
-    generateAccessiblityCookie,
     formatDate,
     decodeClientPayload,
     getAppState,
     getAdminTextMessageType,
     setProxy,
     checkLiveCookie,
-    getAccessFromBusiness,
     getFroms,
     validateSession,
     // Safety & rate limiting exports
@@ -1680,5 +1801,6 @@ module.exports = {
     smartSafetyLimiter,
     safeMode,
     ultraSafeMode,
-    isUserAllowed
+    isUserAllowed,
+    getLatestDocIDs
 };

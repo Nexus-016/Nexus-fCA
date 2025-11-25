@@ -39,6 +39,58 @@ const topics = [
   "/webrtc_response",
 ];
 let WebSocket_Global;
+
+function getRandomReconnectTime() {
+    const min = 26 * 60 * 1000;
+    const max = 60 * 60 * 1000;
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function fetchSeqID(defaultFuncs, api, ctx, callback) {
+    const form = {
+      av: ctx.globalOptions.pageID,
+      queries: JSON.stringify({
+        o0: {
+          doc_id: "3336396659757871",
+          query_params: {
+            limit: 1,
+            before: null,
+            tags: ["INBOX"],
+            includeDeliveryReceipts: false,
+            includeSeqID: true,
+          },
+        },
+      }),
+    };
+    defaultFuncs
+      .post("https://www.facebook.com/api/graphqlbatch/", ctx.jar, form)
+      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then((resData) => {
+        if (utils.getType(resData) !== "Array") throw { error: "Not logged in", res: resData };
+        if (resData && resData[resData.length - 1].error_results > 0)
+          throw resData[0].o0.errors;
+        if (resData[resData.length - 1].successful_results === 0)
+          throw {
+            error: "getSeqId: there was no successful_results",
+            res: resData,
+          };
+        if (resData[0].o0.data.viewer.message_threads.sync_sequence_id) {
+          ctx.lastSeqId = resData[0].o0.data.viewer.message_threads.sync_sequence_id;
+          callback(null);
+        } else
+          throw {
+            error: "getSeqId: no sync_sequence_id found.",
+            res: resData,
+          };
+      })
+      .catch((err) => {
+        log.error("getSeqId", err);
+        if (utils.getType(err) === "Object" && err.error === "Not logged in")
+          ctx.loggedIn = false;
+        callback(err);
+      });
+}
+
 // Adaptive backoff state (per-process singleton like) - tie to ctx
 function getBackoffState(ctx){
   if(!ctx._adaptiveReconnect){
@@ -163,15 +215,6 @@ function buildStream(options, WebSocket, Proxy) {
         }
       }
     }, pingMs);
-    // Extended timeout for long-running stability (5 minutes instead of 1 minute)
-    const reconnectMs = parseInt(process.env.NEXUS_MQTT_RECONNECT_TIMEOUT, 10) || 300000;
-    reconnectTimeout = setTimeout(() => {
-      if (WebSocket.readyState === WebSocket.OPEN) {
-        WebSocket.close();
-        Stream.end();
-        Stream.destroy();
-      }
-    }, reconnectMs);
   };
   WebSocket_Global = WebSocket;
   Proxy.on("close", () => {
@@ -341,7 +384,15 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       return globalCallback({ type: "not_logged_in", error: errMsg });
     }
     if (ctx.globalOptions.autoReconnect) {
-      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
+      // WS3-style: fetch SeqID then reconnect to ensure fresh state
+      fetchSeqID(defaultFuncs, api, ctx, (err) => {
+        if (err) {
+          log.warn("listenMqtt", "Failed to refresh SeqID on error, falling back to adaptive reconnect...");
+          scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
+        } else {
+          listenMqtt(defaultFuncs, api, ctx, globalCallback);
+        }
+      });
     } else {
       utils.checkLiveCookie(ctx, defaultFuncs)
         .then(() => globalCallback({ type: "stop_listen", error: "Connection refused: Server unavailable" }))
@@ -351,8 +402,16 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   // Ensure reconnection also triggers on unexpected close without prior error
   mqttClient.on('close', function () {
     ctx.health.onDisconnect();
-  if(ctx.health && typeof ctx.health.incFailure === 'function'){ ctx.health.incFailure(); }
-  log.warn('listenMqtt', `MQTT bridge socket closed after ${(Date.now()-attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);
+    if(ctx.health && typeof ctx.health.incFailure === 'function'){ ctx.health.incFailure(); }
+    
+    const duration = Date.now() - attemptStartTs;
+    // Consider connections lasting longer than 5 minutes as "stable"
+    if (duration > 5 * 60 * 1000) {
+        log.info('listenMqtt', `MQTT connection closed after ${Math.floor(duration/1000)}s (normal lifecycle). Reconnecting...`);
+    } else {
+        log.warn('listenMqtt', `MQTT bridge socket closed abruptly after ${duration}ms (attempt=${ctx._mqttDiag.attempts}).`);
+    }
+
     if (!ctx.loggedIn) return; // avoid loops if logged out
     if (ctx.globalOptions.autoReconnect) {
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
@@ -360,8 +419,15 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   });
   mqttClient.on('disconnect', function(){
     ctx.health.onDisconnect();
-  if(ctx.health && typeof ctx.health.incFailure === 'function'){ ctx.health.incFailure(); }
-  log.warn('listenMqtt', `MQTT bridge disconnect event after ${(Date.now()-attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);
+    if(ctx.health && typeof ctx.health.incFailure === 'function'){ ctx.health.incFailure(); }
+    
+    const duration = Date.now() - attemptStartTs;
+    if (duration > 5 * 60 * 1000) {
+        log.info('listenMqtt', `MQTT disconnected after ${Math.floor(duration/1000)}s (normal lifecycle). Reconnecting...`);
+    } else {
+        log.warn('listenMqtt', `MQTT bridge disconnect event after ${duration}ms (attempt=${ctx._mqttDiag.attempts}).`);
+    }
+
     if (!ctx.loggedIn) return;
     if (ctx.globalOptions.autoReconnect) {
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
@@ -371,6 +437,17 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     resetBackoff(backoff);
     backoff.consecutiveFails = 0;  // Reset consecutive failures on successful connect
     ctx.health.onConnect();
+
+    // WS3-style randomized proactive reconnect (26-60 mins)
+    if (ctx._reconnectTimer) clearTimeout(ctx._reconnectTimer);
+    const reconnectTime = getRandomReconnectTime();
+    if (verboseMqtt) log.info('listenMqtt', `Scheduled proactive reconnect in ${Math.floor(reconnectTime / 60000)} minutes.`);
+    ctx._reconnectTimer = setTimeout(() => {
+        log.info('listenMqtt', `Executing proactive reconnect...`);
+        if (ctx.mqttClient) ctx.mqttClient.end(true);
+        listenMqtt(defaultFuncs, api, ctx, globalCallback);
+    }, reconnectTime);
+
   if (verboseMqtt) {
     log.info('listenMqtt', `Nexus MQTT bridge established in ${(Date.now()-attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);
   }
@@ -1089,40 +1166,17 @@ module.exports = function (defaultFuncs, api, ctx) {
   let globalCallback = identity;
   getSeqID = function getSeqID() {
     ctx.t_mqttCalled = false;
-    defaultFuncs
-      .post("https://www.facebook.com/api/graphqlbatch/", ctx.jar, form)
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
-      .then((resData) => {
-        if (utils.getType(resData) !== "Array") throw { error: "Not logged in", res: resData };
-        if (resData && resData[resData.length - 1].error_results > 0)
-          throw resData[0].o0.errors;
-        if (resData[resData.length - 1].successful_results === 0)
-          throw {
-            error: "getSeqId: there was no successful_results",
-            res: resData,
-          };
-        if (resData[0].o0.data.viewer.message_threads.sync_sequence_id) {
-          ctx.lastSeqId =
-            resData[0].o0.data.viewer.message_threads.sync_sequence_id;
-          listenMqtt(defaultFuncs, api, ctx, globalCallback);
-        } else
-          throw {
-            error: "getSeqId: no sync_sequence_id found.",
-            res: resData,
-          };
-      })
-      .catch((err) => {
-        log.error("getSeqId", err);
-        if (utils.getType(err) === "Object" && err.error === "Not logged in")
-          ctx.loggedIn = false;
-        return globalCallback(err);
-      });
+    fetchSeqID(defaultFuncs, api, ctx, (err) => {
+      if (err) return globalCallback(err);
+      listenMqtt(defaultFuncs, api, ctx, globalCallback);
+    });
   };
   return function (callback) {
     class MessageEmitter extends EventEmitter {
       stopListening(callback) {
         callback = callback || (() => {});
         globalCallback = identity;
+        if (ctx._reconnectTimer) clearTimeout(ctx._reconnectTimer);
         if (ctx.mqttClient) {
           ctx.mqttClient.unsubscribe("/webrtc");
           ctx.mqttClient.unsubscribe("/rtc_multi");

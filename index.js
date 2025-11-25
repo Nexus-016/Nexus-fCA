@@ -209,9 +209,75 @@ function buildAPI(globalOptions, html, jar) {
   if (process.env.NEXUS_REGION) {
     try { region = process.env.NEXUS_REGION.toUpperCase(); } catch(_) {}
   }
-  const tokenMatch = html.match(/DTSGInitialData.*?token":"(.*?)"/);
-  if (tokenMatch) {
-    fb_dtsg = tokenMatch[1];
+  
+  // Robust fb_dtsg extraction
+  const dtsgRegexes = [
+    /DTSGInitialData.*?token":"(.*?)"/,
+    /"DTSGInitData",\[\],{"token":"(.*?)"/,
+    /\["DTSGInitData",\[\],{"token":"(.*?)"/,
+    /name="fb_dtsg" value="(.*?)"/,
+    /name="dtsg_ag" value="(.*?)"/
+  ];
+  
+  for (const regex of dtsgRegexes) {
+    const match = html.match(regex);
+    if (match && match[1]) {
+      fb_dtsg = match[1];
+      break;
+    }
+  }
+
+  // NEW: JSON Parsing Fallback (inspired by ws3-fca)
+  if (!fb_dtsg) {
+      try {
+          const extractNetData = (html) => {
+            const allScriptsData = [];
+            const scriptRegex = /<script type="application\/json"[^>]*>(.*?)<\/script>/g;
+            let match;
+            while ((match = scriptRegex.exec(html)) !== null) {
+                try {
+                    allScriptsData.push(JSON.parse(match[1]));
+                } catch (e) { }
+            }
+            return allScriptsData;
+          };
+          
+          const netData = extractNetData(html);
+          
+          const findConfig = (key) => {
+            for (const scriptData of netData) {
+                if (scriptData.require) {
+                    for (const req of scriptData.require) {
+                        if (Array.isArray(req) && req[0] === key && req[2]) {
+                            return req[2];
+                        }
+                        if (Array.isArray(req) && req[3] && req[3][0] && req[3][0].__bbox && req[3][0].__bbox.define) {
+                            for (const def of req[3][0].__bbox.define) {
+                                if (Array.isArray(def) && def[0].endsWith(key) && def[2]) {
+                                    return def[2];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return null;
+          };
+          
+          const dtsgData = findConfig("DTSGInitialData");
+          if (dtsgData && dtsgData.token) {
+              fb_dtsg = dtsgData.token;
+              log.verbose("login", "Found fb_dtsg via JSON parsing");
+          }
+      } catch (e) {
+          log.verbose("login", "JSON parsing for fb_dtsg failed: " + e.message);
+      }
+  }
+  
+  if (!fb_dtsg) {
+      // log.warn("login", "Could not find fb_dtsg in HTML. Session might be limited.");
+  } else {
+      log.verbose("login", "Found fb_dtsg: " + fb_dtsg.substring(0, 10) + "...");
   }
 
 
@@ -585,9 +651,76 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       return res;
     })
     .then(handleRedirect)
-    .then(res => {
+    .then(async res => {
       const html = res.body;
       const Obj = buildAPI(globalOptions, html, jar);
+      
+      // Fallback: Try mbasic.facebook.com if fb_dtsg is missing
+      if (!Obj.ctx.fb_dtsg) {
+          logger("Attempting to fetch fb_dtsg from mbasic.facebook.com...", "info");
+          try {
+              const mobileOptions = {
+                  ...globalOptions,
+                  userAgent: "Mozilla/5.0 (Linux; Android 12; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36"
+              };
+              const mRes = await utils.get("https://mbasic.facebook.com/", jar, null, mobileOptions);
+              const mHtml = mRes.body;
+              const mMatch = mHtml.match(/name="fb_dtsg" value="(.*?)"/);
+              if (mMatch && mMatch[1]) {
+                  Obj.ctx.fb_dtsg = mMatch[1];
+                  Obj.ctx.ttstamp = "2" + Obj.ctx.fb_dtsg.split("").map(c => c.charCodeAt(0)).join("");
+                  logger("Found fb_dtsg from mbasic.facebook.com", "success");
+                  
+                  // Re-create defaultFuncs with the new token
+                  Obj.defaultFuncs = utils.makeDefaults(html, Obj.ctx.userID, Obj.ctx);
+              } else {
+                   // Try one more: dtsg_ag
+                   const agMatch = mHtml.match(/name="dtsg_ag" value="(.*?)"/);
+                   if (agMatch && agMatch[1]) {
+                        Obj.ctx.fb_dtsg = agMatch[1];
+                        Obj.ctx.ttstamp = "2" + Obj.ctx.fb_dtsg.split("").map(c => c.charCodeAt(0)).join("");
+                        logger("Found fb_dtsg (ag) from mbasic.facebook.com", "success");
+                        Obj.defaultFuncs = utils.makeDefaults(html, Obj.ctx.userID, Obj.ctx);
+                   } else {
+                       logger("Failed to find fb_dtsg in mbasic response", "warn");
+                   }
+              }
+              
+              // Second Fallback: Try business.facebook.com
+              if (!Obj.ctx.fb_dtsg) {
+                  logger("Attempting to fetch fb_dtsg from business.facebook.com...", "info");
+                  try {
+                      const bRes = await utils.get("https://business.facebook.com/business_locations", jar, null, globalOptions);
+                      const bHtml = bRes.body;
+                      const bMatch = bHtml.match(/name="fb_dtsg" value="(.*?)"/) || bHtml.match(/DTSGInitialData.*?token":"(.*?)"/);
+                      if (bMatch && bMatch[1]) {
+                          Obj.ctx.fb_dtsg = bMatch[1];
+                          Obj.ctx.ttstamp = "2" + Obj.ctx.fb_dtsg.split("").map(c => c.charCodeAt(0)).join("");
+                          logger("Found fb_dtsg from business.facebook.com", "success");
+                          Obj.defaultFuncs = utils.makeDefaults(html, Obj.ctx.userID, Obj.ctx);
+                      } else {
+                          logger("Failed to find fb_dtsg in business response", "warn");
+                          // Debug: Print what we got
+                          if (bHtml.includes("login_form") || bHtml.includes("checkpoint")) {
+                              logger("Response indicates login/checkpoint page", "error");
+                          } else {
+                              logger("Response start: " + bHtml.substring(0, 200), "verbose");
+                          }
+                      }
+                  } catch (e) {
+                      logger("Failed to fetch fallback fb_dtsg from business: " + e.message, "warn");
+                  }
+              }
+
+          } catch (e) {
+              logger("Failed to fetch fallback fb_dtsg: " + e.message, "warn");
+          }
+      }
+
+      if (!Obj.ctx.fb_dtsg) {
+          log.warn("login", "Could not find fb_dtsg in HTML or fallbacks. Session might be limited.");
+      }
+
       ctx = Obj.ctx;
       api = Obj.api;
       return res;

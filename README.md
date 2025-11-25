@@ -2,11 +2,13 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="520" />
 </p>
 
-# Nexus-FCA v3.1.0 – 🏆 THE BEST, SAFEST, MOST STABLE FCA
+# Nexus-FCA v3.1.1 – 🏆 THE BEST, SAFEST, MOST STABLE FCA
 
 Modern, safe, production‑ready Messenger (Facebook Chat) API layer with **email/password + appState login**, **proxy support**, **random user agent**, adaptive session & connection resilience, proactive cookie refresh, MQTT stability enhancements, delivery reliability safeguards, memory protection, and rich runtime metrics. Promise + callback compatible, TypeScript typed, minimal friction.
 
-## 🎉 NEW in 3.1.0 - Industry Leading Features!
+## 🎉 NEW in 3.1.1 - Industry Leading Features!
+- ✅ **Smart MQTT Recovery** - Auto-refreshes Sequence ID on errors to prevent loops
+- ✅ **Proactive Lifecycle Management** - Randomized reconnects (26-60m) to mimic human behavior
 - ✅ **Email/Password Login** - Login with Facebook credentials (not just cookies!)
 - ✅ **Advanced Proxy Support** - HTTP/HTTPS/SOCKS5 proxy for all connections
 - ✅ **Random User Agent** - 14+ realistic user agents to avoid detection
@@ -139,7 +141,9 @@ await login({ appState }, { disablePreflight: true });
 ```
 
 ---
-## 🛰️ MQTT Enhancements (Since 2.1.x)
+## 🛰️ MQTT Enhancements (Since 3.1.x)
+- **Smart Recovery**: Fetches fresh Sequence ID before reconnecting on errors (prevents stale token loops)
+- **Lifecycle Management**: Proactive randomized reconnects (26-60m) to avoid long-session forced disconnects
 - Adaptive reconnect curve (caps 5m)
 - Layered post-refresh probes (1s / 10s / 30s)
 - Synthetic randomized keepalives (55–75s)
