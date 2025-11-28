@@ -402,14 +402,18 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   // Ensure reconnection also triggers on unexpected close without prior error
   mqttClient.on('close', function () {
     ctx.health.onDisconnect();
-    if(ctx.health && typeof ctx.health.incFailure === 'function'){ ctx.health.incFailure(); }
-    
+    if (ctx.health && typeof ctx.health.incFailure === 'function') { ctx.health.incFailure(); }
+
     const duration = Date.now() - attemptStartTs;
-    // Consider connections lasting longer than 5 minutes as "stable"
-    if (duration > 5 * 60 * 1000) {
-        log.info('listenMqtt', `MQTT connection closed after ${Math.floor(duration/1000)}s (normal lifecycle). Reconnecting...`);
+    const seconds = Math.floor(duration / 1000);
+
+    // Treat long-lived connections as normal lifecycle, keep logs calm
+    if (duration >= 30 * 60 * 1000) { // >= 30 minutes
+      log.info('listenMqtt', `MQTT connection closed after ${seconds}s (normal lifecycle). Reconnecting...`);
+    } else if (duration >= 5 * 60 * 1000) { // 5-30 minutes
+      log.info('listenMqtt', `MQTT connection closed after ${seconds}s (remote close). Reconnecting with backoff...`);
     } else {
-        log.warn('listenMqtt', `MQTT bridge socket closed abruptly after ${duration}ms (attempt=${ctx._mqttDiag.attempts}).`);
+      log.warn('listenMqtt', `MQTT bridge socket closed quickly after ${duration}ms (attempt=${ctx._mqttDiag.attempts}).`);
     }
 
     if (!ctx.loggedIn) return; // avoid loops if logged out
@@ -417,15 +421,20 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
     }
   });
+
   mqttClient.on('disconnect', function(){
     ctx.health.onDisconnect();
-    if(ctx.health && typeof ctx.health.incFailure === 'function'){ ctx.health.incFailure(); }
-    
+    if (ctx.health && typeof ctx.health.incFailure === 'function') { ctx.health.incFailure(); }
+
     const duration = Date.now() - attemptStartTs;
-    if (duration > 5 * 60 * 1000) {
-        log.info('listenMqtt', `MQTT disconnected after ${Math.floor(duration/1000)}s (normal lifecycle). Reconnecting...`);
+    const seconds = Math.floor(duration / 1000);
+
+    if (duration >= 30 * 60 * 1000) {
+      log.info('listenMqtt', `MQTT disconnected after ${seconds}s (normal lifecycle). Reconnecting...`);
+    } else if (duration >= 5 * 60 * 1000) {
+      log.info('listenMqtt', `MQTT disconnected after ${seconds}s (remote close). Reconnecting with backoff...`);
     } else {
-        log.warn('listenMqtt', `MQTT bridge disconnect event after ${duration}ms (attempt=${ctx._mqttDiag.attempts}).`);
+      log.warn('listenMqtt', `MQTT bridge disconnect event after ${duration}ms (attempt=${ctx._mqttDiag.attempts}).`);
     }
 
     if (!ctx.loggedIn) return;
@@ -433,20 +442,45 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
     }
   });
+
   mqttClient.on("connect", function () {
     resetBackoff(backoff);
     backoff.consecutiveFails = 0;  // Reset consecutive failures on successful connect
+    // Reset or wrap MQTT attempt counter so long-lived sessions don't look scary
+    ctx._mqttDiag = ctx._mqttDiag || {};
+    if (typeof ctx._mqttDiag.attempts !== 'number' || ctx._mqttDiag.attempts > 100000) {
+      ctx._mqttDiag.attempts = 1;
+    } else {
+      ctx._mqttDiag.attempts++;
+    }
     ctx.health.onConnect();
 
-    // WS3-style randomized proactive reconnect (26-60 mins)
+    // WS3-style randomized proactive reconnect (tunable window).
+    // If globalOptions override is provided, respect that; otherwise
+    // default to a slightly longer window to avoid overlapping too much
+    // with remote/NAT closes.
     if (ctx._reconnectTimer) clearTimeout(ctx._reconnectTimer);
-    const reconnectTime = getRandomReconnectTime();
-    if (verboseMqtt) log.info('listenMqtt', `Scheduled proactive reconnect in ${Math.floor(reconnectTime / 60000)} minutes.`);
-    ctx._reconnectTimer = setTimeout(() => {
-        log.info('listenMqtt', `Executing proactive reconnect...`);
+    let reconnectTime = null;
+    const opts = ctx.globalOptions || {};
+    const proactiveEnabled = opts.mqttProactiveReconnectEnabled;
+
+    if (proactiveEnabled !== false) {
+      const minM = Number.isFinite(opts.mqttProactiveReconnectMinMinutes) ? opts.mqttProactiveReconnectMinMinutes : 120; // 2h
+      const maxM = Number.isFinite(opts.mqttProactiveReconnectMaxMinutes) ? opts.mqttProactiveReconnectMaxMinutes : 240; // 4h
+      const min = Math.min(minM, maxM);
+      const max = Math.max(minM, maxM);
+      const intervalMinutes = Math.floor(Math.random() * (max - min + 1)) + min;
+      reconnectTime = intervalMinutes * 60 * 1000;
+    }
+
+    if (reconnectTime) {
+      if (verboseMqtt) log.info('listenMqtt', `Scheduled proactive reconnect in ${Math.floor(reconnectTime / 60000)} minutes.`);
+      ctx._reconnectTimer = setTimeout(() => {
+        log.info('listenMqtt', `Executing proactive proactive reconnect (timer window).`);
         if (ctx.mqttClient) ctx.mqttClient.end(true);
         listenMqtt(defaultFuncs, api, ctx, globalCallback);
-    }, reconnectTime);
+      }, reconnectTime);
+    }
 
   if (verboseMqtt) {
     log.info('listenMqtt', `Nexus MQTT bridge established in ${(Date.now()-attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);

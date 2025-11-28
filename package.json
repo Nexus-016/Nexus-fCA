@@ -1,6 +1,6 @@
 {
   "name": "nexus-fca",
-  "version": "3.1.2",
+  "version": "3.1.3",
   "description": "Nexus-FCA 3.1 – THE BEST, SAFEST, MOST STABLE Facebook Messenger API! Email/password + appState login, proxy support (HTTP/HTTPS/SOCKS5), random user agent, proactive cookie refresh, MQTT stability, session protection, and TypeScript support.",
   "main": "index.js",
   "repository": {
