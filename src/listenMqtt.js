@@ -93,19 +93,34 @@ function fetchSeqID(defaultFuncs, api, ctx, callback) {
 
 // Adaptive backoff state (per-process singleton like) - tie to ctx
 function getBackoffState(ctx){
+  const envBase = parseInt(process.env.NEXUS_MQTT_BACKOFF_BASE, 10) || 1000;
+  const envMax = parseInt(process.env.NEXUS_MQTT_BACKOFF_MAX, 10) || (5 * 60 * 1000);
+  const envFactor = parseFloat(process.env.NEXUS_MQTT_BACKOFF_FACTOR) || 2;
+  const backoffOverrides = (ctx.globalOptions && ctx.globalOptions.backoff) || {};
+  const resolved = {
+    base: Number.isFinite(backoffOverrides.baseMs) ? backoffOverrides.baseMs : envBase,
+    max: Number.isFinite(backoffOverrides.maxMs) ? backoffOverrides.maxMs : envMax,
+    factor: Number.isFinite(backoffOverrides.factor) ? backoffOverrides.factor : envFactor,
+    jitter: typeof backoffOverrides.jitter === 'number' ? backoffOverrides.jitter : 0.25,
+    resetAfterMs: Number.isFinite(backoffOverrides.resetAfterMs) ? backoffOverrides.resetAfterMs : (3 * 60 * 1000)
+  };
   if(!ctx._adaptiveReconnect){
-    const envBase = parseInt(process.env.NEXUS_MQTT_BACKOFF_BASE, 10) || 1000;
-    const envMax = parseInt(process.env.NEXUS_MQTT_BACKOFF_MAX, 10) || (5 * 60 * 1000);
-    const envFactor = parseFloat(process.env.NEXUS_MQTT_BACKOFF_FACTOR) || 2;
     ctx._adaptiveReconnect = {
-      base: envBase,          // 1s default
-      max: envMax,  // 5m default
-      factor: envFactor,
-      jitter: 0.25,        // 25% random
+      base: resolved.base,
+      max: resolved.max,
+      factor: resolved.factor,
+      jitter: resolved.jitter,
+      resetAfterMs: resolved.resetAfterMs,
       current: 0,
       lastResetTs: 0,
       consecutiveFails: 0  // Track consecutive failures
     };
+  } else {
+    ctx._adaptiveReconnect.base = resolved.base;
+    ctx._adaptiveReconnect.max = resolved.max;
+    ctx._adaptiveReconnect.factor = resolved.factor;
+    ctx._adaptiveReconnect.jitter = resolved.jitter;
+    ctx._adaptiveReconnect.resetAfterMs = resolved.resetAfterMs;
   }
   return ctx._adaptiveReconnect;
 }
@@ -388,7 +403,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       fetchSeqID(defaultFuncs, api, ctx, (err) => {
         if (err) {
           log.warn("listenMqtt", "Failed to refresh SeqID on error, falling back to adaptive reconnect...");
-          scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
+          scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, 'seqid-refresh-failed');
         } else {
           listenMqtt(defaultFuncs, api, ctx, globalCallback);
         }
@@ -418,7 +433,15 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
 
     if (!ctx.loggedIn) return; // avoid loops if logged out
     if (ctx.globalOptions.autoReconnect) {
-      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
+      const backoffState = getBackoffState(ctx);
+      const resetThreshold = backoffState.resetAfterMs || (3 * 60 * 1000);
+      let reconnectReason = 'close';
+      if (duration >= resetThreshold) {
+        log.info('listenMqtt', `Resetting MQTT backoff after ${seconds}s healthy session.`);
+        resetBackoff(backoffState);
+        reconnectReason = 'close-long';
+      }
+      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reconnectReason);
     }
   });
 
@@ -439,7 +462,15 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
 
     if (!ctx.loggedIn) return;
     if (ctx.globalOptions.autoReconnect) {
-      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
+      const backoffState = getBackoffState(ctx);
+      const resetThreshold = backoffState.resetAfterMs || (3 * 60 * 1000);
+      let reconnectReason = 'disconnect';
+      if (duration >= resetThreshold) {
+        log.info('listenMqtt', `Resetting MQTT backoff after ${seconds}s healthy session.`);
+        resetBackoff(backoffState);
+        reconnectReason = 'disconnect-long';
+      }
+      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reconnectReason);
     }
   });
 
@@ -522,7 +553,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     const rTimeout = setTimeout(function () {
       ctx.health.onError('timeout_no_t_ms');
       mqttClient.end();
-      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback);
+      scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, 'tms-timeout');
     }, 5000);
     ctx.tmsWait = function () {
       clearTimeout(rTimeout);
@@ -619,11 +650,12 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     }, 55000 + Math.floor(Math.random()*20000));
   }
 }
-function scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback){
+function scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reason){
   const state = getBackoffState(ctx);
   const delay = computeNextDelay(state);
   ctx.health.onReconnectScheduled(delay);
-  log.warn('listenMqtt', `Reconnecting in ${delay} ms (adaptive backoff)`);
+  const suffix = reason ? ` (${reason})` : '';
+  log.warn('listenMqtt', `Reconnecting in ${delay} ms (adaptive backoff)${suffix}`);
   setTimeout(()=>listenMqtt(defaultFuncs, api, ctx, globalCallback), delay);
 }
 function getTaskResponseData(taskType, payload) {
