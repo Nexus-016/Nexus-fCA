@@ -136,6 +136,126 @@ function resetBackoff(state){
   state.current = 0;
   state.lastResetTs = Date.now();
 }
+function getForegroundState(ctx){
+  if (ctx && ctx.globalOptions) {
+    if (ctx.globalOptions.foreground === false) return false;
+    if (ctx.globalOptions.online === false) return false;
+  }
+  return true;
+}
+function startForegroundRefresh(ctx){
+  if (ctx._foregroundRefreshInterval) {
+    clearInterval(ctx._foregroundRefreshInterval);
+    ctx._foregroundRefreshInterval = null;
+  }
+  const options = ctx.globalOptions || {};
+  if (options.foregroundRefreshEnabled === false) return;
+  const minutes = Number.isFinite(options.foregroundRefreshMinutes)
+    ? Math.max(1, options.foregroundRefreshMinutes)
+    : 15;
+  ctx._foregroundRefreshInterval = setInterval(() => {
+    if (!ctx.mqttClient || !ctx.mqttClient.connected) return;
+    try {
+      const foreground = getForegroundState(ctx);
+      ctx.mqttClient.publish("/foreground_state", JSON.stringify({ foreground }), { qos: 0, retain: false });
+      ctx.mqttClient.publish(
+        "/set_client_settings",
+        JSON.stringify({ make_user_available_when_in_foreground: true }),
+        { qos: 0, retain: false }
+      );
+    } catch (err) {
+      if (typeof log.verbose === 'function') {
+        log.verbose("listenMqtt", `Foreground refresh publish failed: ${err.message || err}`);
+      }
+    }
+  }, minutes * 60 * 1000);
+}
+function stopForegroundRefresh(ctx){
+  if (ctx && ctx._foregroundRefreshInterval) {
+    clearInterval(ctx._foregroundRefreshInterval);
+    ctx._foregroundRefreshInterval = null;
+  }
+}
+function getStormGuard(ctx){
+  if(!ctx._mqttStorm){
+    ctx._mqttStorm = {
+      events: [],
+      windowMs: 30 * 60 * 1000,
+      threshold: 12,
+      quietMs: 90 * 1000,
+      extraDelayMs: 120 * 1000,
+      quietUntil: 0,
+      active: false,
+      lastLogTs: 0
+    };
+  }
+  return ctx._mqttStorm;
+}
+function noteStormEvent(ctx){
+  const guard = getStormGuard(ctx);
+  const now = Date.now();
+  guard.events.push(now);
+  guard.events = guard.events.filter(ts => now - ts <= guard.windowMs);
+  if (guard.events.length >= guard.threshold) {
+    guard.active = true;
+    guard.quietUntil = now + guard.quietMs;
+  } else if (guard.active && now > guard.quietUntil) {
+    guard.active = false;
+  }
+  return guard;
+}
+function resetStormGuard(ctx){
+  if(ctx._mqttStorm){
+    ctx._mqttStorm.events = [];
+    ctx._mqttStorm.active = false;
+    ctx._mqttStorm.quietUntil = 0;
+    ctx._mqttStorm.lastLogTs = 0;
+  }
+}
+function shouldLogStorm(guard){
+  if(!guard || !guard.active) return true;
+  const now = Date.now();
+  if(!guard.lastLogTs || now - guard.lastLogTs > guard.quietMs){
+    guard.lastLogTs = now;
+    return true;
+  }
+  return false;
+}
+async function runStormRecovery(ctx, api, defaultFuncs){
+  if(ctx._stormRecoveryRunning) return;
+  ctx._stormRecoveryRunning = true;
+  try {
+    log.warn('listenMqtt', 'Storm recovery triggered: validating session & refreshing tokens.');
+    try {
+      await utils.validateSession(ctx, defaultFuncs, { retries: 1, delayMs: 1000 });
+    } catch (err) {
+      log.warn('listenMqtt', `Storm validateSession failed: ${err.message || err}`);
+    }
+    if (api && typeof api.refreshFb_dtsg === 'function') {
+      try {
+        await api.refreshFb_dtsg();
+      } catch (err) {
+        log.warn('listenMqtt', `Storm fb_dtsg refresh failed: ${err.message || err}`);
+      }
+    }
+    if (ctx.globalSafety && typeof ctx.globalSafety.refreshSafeSession === 'function') {
+      try {
+        await ctx.globalSafety.refreshSafeSession();
+      } catch (err) {
+        log.warn('listenMqtt', `Storm safe session refresh failed: ${err.message || err}`);
+      }
+    }
+  } finally {
+    ctx._stormRecoveryRunning = false;
+  }
+}
+function scheduleStormRecovery(ctx, api, defaultFuncs, guard){
+  if(!guard || !guard.active) return;
+  const now = Date.now();
+  if(ctx._nextStormRecovery && now < ctx._nextStormRecovery) return;
+  ctx._nextStormRecovery = now + guard.quietMs;
+  runStormRecovery(ctx, api, defaultFuncs);
+}
 // Build lazy preflight gating
 function shouldRunPreflight(ctx){
   if(ctx.globalOptions.disablePreflight) return false;
@@ -287,8 +407,8 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       }
     })();
   }
-  const chatOn = ctx.globalOptions.online;
-  const foreground = false;
+  const chatOn = (ctx.globalOptions && ctx.globalOptions.online === false) ? false : true;
+  const foreground = getForegroundState(ctx);
   const sessionID = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) + 1;
   const GUID = utils.getGUID();
   const username = {
@@ -418,17 +538,27 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   mqttClient.on('close', function () {
     ctx.health.onDisconnect();
     if (ctx.health && typeof ctx.health.incFailure === 'function') { ctx.health.incFailure(); }
+    stopForegroundRefresh(ctx);
 
     const duration = Date.now() - attemptStartTs;
     const seconds = Math.floor(duration / 1000);
 
+    const shortWindowMs = 5 * 60 * 1000;
+    const guard = duration < shortWindowMs ? noteStormEvent(ctx) : getStormGuard(ctx);
+    const allowLog = shouldLogStorm(guard);
+    const stormSuffix = guard && guard.active ? ` [storm:${guard.events.length}/${Math.round(guard.windowMs/60000)}m]` : '';
+    if (guard && guard.active) {
+      scheduleStormRecovery(ctx, api, defaultFuncs, guard);
+    }
     // Treat long-lived connections as normal lifecycle, keep logs calm
     if (duration >= 30 * 60 * 1000) { // >= 30 minutes
-      log.info('listenMqtt', `MQTT connection closed after ${seconds}s (normal lifecycle). Reconnecting...`);
+      if (allowLog) log.info('listenMqtt', `MQTT connection closed after ${seconds}s (normal lifecycle). Reconnecting...${stormSuffix}`);
     } else if (duration >= 5 * 60 * 1000) { // 5-30 minutes
-      log.info('listenMqtt', `MQTT connection closed after ${seconds}s (remote close). Reconnecting with backoff...`);
+      if (allowLog) log.info('listenMqtt', `MQTT connection closed after ${seconds}s (remote close). Reconnecting with backoff...${stormSuffix}`);
+    } else if (duration >= 60 * 1000) {
+      if (allowLog) log.info('listenMqtt', `MQTT connection closed after ${seconds}s (short remote close). Reconnecting with backoff...${stormSuffix}`);
     } else {
-      log.warn('listenMqtt', `MQTT bridge socket closed quickly after ${duration}ms (attempt=${ctx._mqttDiag.attempts}).`);
+      if (allowLog) log.warn('listenMqtt', `MQTT bridge socket closed quickly after ${duration}ms (attempt=${ctx._mqttDiag.attempts}).${stormSuffix}`);
     }
 
     if (!ctx.loggedIn) return; // avoid loops if logged out
@@ -439,6 +569,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       if (duration >= resetThreshold) {
         log.info('listenMqtt', `Resetting MQTT backoff after ${seconds}s healthy session.`);
         resetBackoff(backoffState);
+        resetStormGuard(ctx);
         reconnectReason = 'close-long';
       }
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reconnectReason);
@@ -448,16 +579,26 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   mqttClient.on('disconnect', function(){
     ctx.health.onDisconnect();
     if (ctx.health && typeof ctx.health.incFailure === 'function') { ctx.health.incFailure(); }
+    stopForegroundRefresh(ctx);
 
     const duration = Date.now() - attemptStartTs;
     const seconds = Math.floor(duration / 1000);
 
+    const shortWindowMs = 5 * 60 * 1000;
+    const guard = duration < shortWindowMs ? noteStormEvent(ctx) : getStormGuard(ctx);
+    const allowLog = shouldLogStorm(guard);
+    const stormSuffix = guard && guard.active ? ` [storm:${guard.events.length}/${Math.round(guard.windowMs/60000)}m]` : '';
+    if (guard && guard.active) {
+      scheduleStormRecovery(ctx, api, defaultFuncs, guard);
+    }
     if (duration >= 30 * 60 * 1000) {
-      log.info('listenMqtt', `MQTT disconnected after ${seconds}s (normal lifecycle). Reconnecting...`);
+      if (allowLog) log.info('listenMqtt', `MQTT disconnected after ${seconds}s (normal lifecycle). Reconnecting...${stormSuffix}`);
     } else if (duration >= 5 * 60 * 1000) {
-      log.info('listenMqtt', `MQTT disconnected after ${seconds}s (remote close). Reconnecting with backoff...`);
+      if (allowLog) log.info('listenMqtt', `MQTT disconnected after ${seconds}s (remote close). Reconnecting with backoff...${stormSuffix}`);
+    } else if (duration >= 60 * 1000) {
+      if (allowLog) log.info('listenMqtt', `MQTT disconnected after ${seconds}s (short remote close). Reconnecting with backoff...${stormSuffix}`);
     } else {
-      log.warn('listenMqtt', `MQTT bridge disconnect event after ${duration}ms (attempt=${ctx._mqttDiag.attempts}).`);
+      if (allowLog) log.warn('listenMqtt', `MQTT bridge disconnect event after ${duration}ms (attempt=${ctx._mqttDiag.attempts}).${stormSuffix}`);
     }
 
     if (!ctx.loggedIn) return;
@@ -468,6 +609,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       if (duration >= resetThreshold) {
         log.info('listenMqtt', `Resetting MQTT backoff after ${seconds}s healthy session.`);
         resetBackoff(backoffState);
+        resetStormGuard(ctx);
         reconnectReason = 'disconnect-long';
       }
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reconnectReason);
@@ -476,6 +618,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
 
   mqttClient.on("connect", function () {
     resetBackoff(backoff);
+    resetStormGuard(ctx);
     backoff.consecutiveFails = 0;  // Reset consecutive failures on successful connect
     // Reset or wrap MQTT attempt counter so long-lived sessions don't look scary
     ctx._mqttDiag = ctx._mqttDiag || {};
@@ -549,6 +692,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       JSON.stringify({ make_user_available_when_in_foreground: true }),
       { qos: 1 }
     );
+    startForegroundRefresh(ctx);
     // Replace fixed rTimeout reconnect with health-driven logic
     const rTimeout = setTimeout(function () {
       ctx.health.onError('timeout_no_t_ms');
@@ -652,9 +796,16 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
 }
 function scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reason){
   const state = getBackoffState(ctx);
-  const delay = computeNextDelay(state);
+  const guard = getStormGuard(ctx);
+  let delay = computeNextDelay(state);
+  if (guard && guard.active) {
+    delay = Math.min(state.max, delay + guard.extraDelayMs);
+  }
   ctx.health.onReconnectScheduled(delay);
-  const suffix = reason ? ` (${reason})` : '';
+  const tags = [];
+  if (reason) tags.push(reason);
+  if (guard && guard.active) tags.push('storm');
+  const suffix = tags.length ? ` (${tags.join(', ')})` : '';
   log.warn('listenMqtt', `Reconnecting in ${delay} ms (adaptive backoff)${suffix}`);
   setTimeout(()=>listenMqtt(defaultFuncs, api, ctx, globalCallback), delay);
 }
