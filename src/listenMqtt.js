@@ -7,9 +7,9 @@ const HttpsProxyAgent = require("https-proxy-agent");
 const EventEmitter = require("events");
 const Duplexify = require("duplexify");
 const { Transform } = require("stream");
-var identity = function () {};
+var identity = function () { };
 var form = {};
-var getSeqID = function () {};
+var getSeqID = function () { };
 const logger = require("../lib/logger.js");
 const { HealthMetrics } = require("../lib/health/HealthMetrics");
 
@@ -41,58 +41,113 @@ const topics = [
 let WebSocket_Global;
 
 function getRandomReconnectTime() {
-    const min = 26 * 60 * 1000;
-    const max = 60 * 60 * 1000;
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+  const min = 26 * 60 * 1000;
+  const max = 60 * 60 * 1000;
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function fetchSeqID(defaultFuncs, api, ctx, callback) {
-    const form = {
-      av: ctx.globalOptions.pageID,
-      queries: JSON.stringify({
-        o0: {
-          doc_id: "3336396659757871",
-          query_params: {
-            limit: 1,
-            before: null,
-            tags: ["INBOX"],
-            includeDeliveryReceipts: false,
-            includeSeqID: true,
-          },
+function fetchSeqID(defaultFuncs, api, ctx, callback, retryCount = 0) {
+  const maxRetries = 3;
+  const baseDelay = 1000; // 1 second
+  const verboseMqtt = (ctx.globalOptions && ctx.globalOptions.verboseMqtt) || process.env.NEXUS_VERBOSE_MQTT === '1';
+
+  if (verboseMqtt) {
+    log.info('fetchSeqID', `Attempting to fetch fresh SeqID (attempt ${retryCount + 1}/${maxRetries + 1})...`);
+  }
+
+  const form = {
+    av: ctx.globalOptions.pageID,
+    queries: JSON.stringify({
+      o0: {
+        doc_id: "3336396659757871",
+        query_params: {
+          limit: 1,
+          before: null,
+          tags: ["INBOX"],
+          includeDeliveryReceipts: false,
+          includeSeqID: true,
         },
-      }),
-    };
-    defaultFuncs
-      .post("https://www.facebook.com/api/graphqlbatch/", ctx.jar, form)
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
-      .then((resData) => {
-        if (utils.getType(resData) !== "Array") throw { error: "Not logged in", res: resData };
-        if (resData && resData[resData.length - 1].error_results > 0)
-          throw resData[0].o0.errors;
-        if (resData[resData.length - 1].successful_results === 0)
-          throw {
-            error: "getSeqId: there was no successful_results",
-            res: resData,
-          };
-        if (resData[0].o0.data.viewer.message_threads.sync_sequence_id) {
-          ctx.lastSeqId = resData[0].o0.data.viewer.message_threads.sync_sequence_id;
-          callback(null);
-        } else
-          throw {
-            error: "getSeqId: no sync_sequence_id found.",
-            res: resData,
-          };
-      })
-      .catch((err) => {
-        log.error("getSeqId", err);
-        if (utils.getType(err) === "Object" && err.error === "Not logged in")
-          ctx.loggedIn = false;
+      },
+    }),
+  };
+
+  defaultFuncs
+    .post("https://www.facebook.com/api/graphqlbatch/", ctx.jar, form)
+    .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+    .then((resData) => {
+      // Validation checks
+      if (utils.getType(resData) !== "Array") {
+        throw { error: "Not logged in", res: resData, type: 'auth_error' };
+      }
+
+      if (resData && resData[resData.length - 1].error_results > 0) {
+        throw { error: resData[0].o0.errors, type: 'graphql_error' };
+      }
+
+      if (resData[resData.length - 1].successful_results === 0) {
+        throw {
+          error: "getSeqId: there was no successful_results",
+          res: resData,
+          type: 'empty_result'
+        };
+      }
+
+      // Extract SeqID
+      const newSeqId = resData[0].o0.data.viewer.message_threads.sync_sequence_id;
+      if (newSeqId) {
+        const oldSeqId = ctx.lastSeqId;
+        ctx.lastSeqId = newSeqId;
+
+        if (verboseMqtt || oldSeqId !== newSeqId) {
+          log.info('fetchSeqID', `✅ SeqID refreshed: ${oldSeqId || '(Init)'} → ${newSeqId}`);
+        }
+
+        // Also update syncToken if available
+        if (resData[0].o0.data.viewer.message_threads.sync_token) {
+          ctx.syncToken = resData[0].o0.data.viewer.message_threads.sync_token;
+          if (verboseMqtt) {
+            log.info('fetchSeqID', `✅ SyncToken also refreshed`);
+          }
+        }
+
+        callback(null);
+      } else {
+        throw {
+          error: "getSeqId: no sync_sequence_id found in response.",
+          res: resData,
+          type: 'missing_seqid'
+        };
+      }
+    })
+    .catch((err) => {
+      const errorType = err.type || 'unknown_error';
+      const isAuthError = errorType === 'auth_error' || (utils.getType(err) === "Object" && err.error === "Not logged in");
+
+      // Auth errors are fatal, don't retry
+      if (isAuthError) {
+        log.error("fetchSeqID", "Authentication failed - session invalid");
+        ctx.loggedIn = false;
+        return callback(err);
+      }
+
+      // For other errors, retry with exponential backoff
+      if (retryCount < maxRetries) {
+        const delay = baseDelay * Math.pow(2, retryCount); // Exponential backoff: 1s, 2s, 4s
+        log.warn("fetchSeqID", `Failed (${errorType}), retrying in ${delay}ms... (${retryCount + 1}/${maxRetries})`);
+
+        setTimeout(() => {
+          fetchSeqID(defaultFuncs, api, ctx, callback, retryCount + 1);
+        }, delay);
+      } else {
+        // Max retries exceeded
+        log.error("fetchSeqID", `Failed after ${maxRetries + 1} attempts: ${err.error || err.message || err}`);
         callback(err);
-      });
+      }
+    });
 }
 
 // Adaptive backoff state (per-process singleton like) - tie to ctx
-function getBackoffState(ctx){
+function getBackoffState(ctx) {
   const envBase = parseInt(process.env.NEXUS_MQTT_BACKOFF_BASE, 10) || 1000;
   const envMax = parseInt(process.env.NEXUS_MQTT_BACKOFF_MAX, 10) || (5 * 60 * 1000);
   const envFactor = parseFloat(process.env.NEXUS_MQTT_BACKOFF_FACTOR) || 2;
@@ -104,7 +159,7 @@ function getBackoffState(ctx){
     jitter: typeof backoffOverrides.jitter === 'number' ? backoffOverrides.jitter : 0.25,
     resetAfterMs: Number.isFinite(backoffOverrides.resetAfterMs) ? backoffOverrides.resetAfterMs : (3 * 60 * 1000)
   };
-  if(!ctx._adaptiveReconnect){
+  if (!ctx._adaptiveReconnect) {
     ctx._adaptiveReconnect = {
       base: resolved.base,
       max: resolved.max,
@@ -124,26 +179,26 @@ function getBackoffState(ctx){
   }
   return ctx._adaptiveReconnect;
 }
-function computeNextDelay(state){
-  if(!state.current) state.current = state.base;
+function computeNextDelay(state) {
+  if (!state.current) state.current = state.base;
   else state.current = Math.min(state.max, state.current * state.factor);
   // jitter
   const rand = (Math.random() * 2 - 1) * state.jitter; // -j..+j
   const delay = Math.max(500, Math.round(state.current * (1 + rand)));
   return delay;
 }
-function resetBackoff(state){
+function resetBackoff(state) {
   state.current = 0;
   state.lastResetTs = Date.now();
 }
-function getForegroundState(ctx){
+function getForegroundState(ctx) {
   if (ctx && ctx.globalOptions) {
     if (ctx.globalOptions.foreground === false) return false;
     if (ctx.globalOptions.online === false) return false;
   }
   return true;
 }
-function startForegroundRefresh(ctx){
+function startForegroundRefresh(ctx) {
   if (ctx._foregroundRefreshInterval) {
     clearInterval(ctx._foregroundRefreshInterval);
     ctx._foregroundRefreshInterval = null;
@@ -170,20 +225,20 @@ function startForegroundRefresh(ctx){
     }
   }, minutes * 60 * 1000);
 }
-function stopForegroundRefresh(ctx){
+function stopForegroundRefresh(ctx) {
   if (ctx && ctx._foregroundRefreshInterval) {
     clearInterval(ctx._foregroundRefreshInterval);
     ctx._foregroundRefreshInterval = null;
   }
 }
-function getStormGuard(ctx){
-  if(!ctx._mqttStorm){
+function getStormGuard(ctx) {
+  if (!ctx._mqttStorm) {
     ctx._mqttStorm = {
       events: [],
-      windowMs: 30 * 60 * 1000,
-      threshold: 12,
-      quietMs: 90 * 1000,
-      extraDelayMs: 120 * 1000,
+      windowMs: 60 * 60 * 1000, // Increased: 30min → 60min window for less false positives
+      threshold: 20, // Increased: 12 → 20 events before triggering storm mode
+      quietMs: 120 * 1000, // Increased: 90s → 120s quiet period
+      extraDelayMs: 180 * 1000, // Increased: 120s → 180s extra delay
       quietUntil: 0,
       active: false,
       lastLogTs: 0
@@ -191,7 +246,7 @@ function getStormGuard(ctx){
   }
   return ctx._mqttStorm;
 }
-function noteStormEvent(ctx){
+function noteStormEvent(ctx) {
   const guard = getStormGuard(ctx);
   const now = Date.now();
   guard.events.push(now);
@@ -204,25 +259,25 @@ function noteStormEvent(ctx){
   }
   return guard;
 }
-function resetStormGuard(ctx){
-  if(ctx._mqttStorm){
+function resetStormGuard(ctx) {
+  if (ctx._mqttStorm) {
     ctx._mqttStorm.events = [];
     ctx._mqttStorm.active = false;
     ctx._mqttStorm.quietUntil = 0;
     ctx._mqttStorm.lastLogTs = 0;
   }
 }
-function shouldLogStorm(guard){
-  if(!guard || !guard.active) return true;
+function shouldLogStorm(guard) {
+  if (!guard || !guard.active) return true;
   const now = Date.now();
-  if(!guard.lastLogTs || now - guard.lastLogTs > guard.quietMs){
+  if (!guard.lastLogTs || now - guard.lastLogTs > guard.quietMs) {
     guard.lastLogTs = now;
     return true;
   }
   return false;
 }
-async function runStormRecovery(ctx, api, defaultFuncs){
-  if(ctx._stormRecoveryRunning) return;
+async function runStormRecovery(ctx, api, defaultFuncs) {
+  if (ctx._stormRecoveryRunning) return;
   ctx._stormRecoveryRunning = true;
   try {
     log.warn('listenMqtt', 'Storm recovery triggered: validating session & refreshing tokens.');
@@ -249,21 +304,21 @@ async function runStormRecovery(ctx, api, defaultFuncs){
     ctx._stormRecoveryRunning = false;
   }
 }
-function scheduleStormRecovery(ctx, api, defaultFuncs, guard){
-  if(!guard || !guard.active) return;
+function scheduleStormRecovery(ctx, api, defaultFuncs, guard) {
+  if (!guard || !guard.active) return;
   const now = Date.now();
-  if(ctx._nextStormRecovery && now < ctx._nextStormRecovery) return;
+  if (ctx._nextStormRecovery && now < ctx._nextStormRecovery) return;
   ctx._nextStormRecovery = now + guard.quietMs;
   runStormRecovery(ctx, api, defaultFuncs);
 }
 // Build lazy preflight gating
-function shouldRunPreflight(ctx){
-  if(ctx.globalOptions.disablePreflight) return false;
-  if(process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true') return false;
+function shouldRunPreflight(ctx) {
+  if (ctx.globalOptions.disablePreflight) return false;
+  if (process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true') return false;
   // If we connected successfully within last 10 minutes, skip heavy preflight to reduce surface.
   const now = Date.now();
   const metrics = ctx.health;
-  if(metrics && metrics.lastConnectTs && (now - metrics.lastConnectTs) < 10*60*1000){
+  if (metrics && metrics.lastConnectTs && (now - metrics.lastConnectTs) < 10 * 60 * 1000) {
     return false;
   }
   return true;
@@ -343,7 +398,7 @@ function buildStream(options, WebSocket, Proxy) {
       if (WebSocket.readyState === WebSocket.OPEN) {
         try {
           WebSocket.ping();
-        } catch(pingErr) {
+        } catch (pingErr) {
           // Ping failed, connection likely dead
           clearTimers();
           WebSocket.close();
@@ -360,17 +415,47 @@ function buildStream(options, WebSocket, Proxy) {
 }
 function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   const attemptStartTs = Date.now();
+
+  // === CONNECTION STATE MACHINE ===
+  // Prevents multiple simultaneous reconnection attempts
+  // States: DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING
+  if (!ctx._mqttState) {
+    ctx._mqttState = {
+      current: 'DISCONNECTED',
+      lastTransition: Date.now(),
+      reconnectInProgress: false
+    };
+  }
+
+  // Prevent multiple simultaneous connection attempts
+  if (ctx._mqttState.reconnectInProgress) {
+    const elapsed = Date.now() - ctx._mqttState.lastTransition;
+    if (elapsed < 5000) { // Less than 5 seconds since last attempt
+      log.warn('listenMqtt', `⚠️ Blocked duplicate reconnect attempt (${elapsed}ms since last). State: ${ctx._mqttState.current}`);
+      return; // Exit early to prevent race condition
+    }
+  }
+
+  // Mark reconnection in progress
+  ctx._mqttState.reconnectInProgress = true;
+  ctx._mqttState.current = 'CONNECTING';
+  ctx._mqttState.lastTransition = Date.now();
+
+  const verboseMqtt = (ctx.globalOptions && ctx.globalOptions.verboseMqtt) || process.env.NEXUS_VERBOSE_MQTT === '1';
+  if (verboseMqtt) {
+    log.info('listenMqtt', `🔄 State transition: ${ctx._mqttState.current} (attempt start)`);
+  }
+
   // Attach health metrics container lazily
-  if(!ctx.health) ctx.health = new (require('../lib/health/HealthMetrics').HealthMetrics)();
+  if (!ctx.health) ctx.health = new (require('../lib/health/HealthMetrics').HealthMetrics)();
   // Ensure tasks map exists to track ls_req -> ls_resp correlations (avoid TypeError on undefined)
-  if(!ctx.tasks) ctx.tasks = new Map();
+  if (!ctx.tasks) ctx.tasks = new Map();
   const backoff = getBackoffState(ctx);
-  if(!ctx._mqttDiag) ctx._mqttDiag = { attempts:0, events:[] }; 
+  if (!ctx._mqttDiag) ctx._mqttDiag = { attempts: 0, events: [] };
   ctx._mqttDiag.attempts++;
   // Suppress previously noisy test info log (visible only if verbose flag enabled or env toggled)
-  const verboseMqtt = (ctx.globalOptions && ctx.globalOptions.verboseMqtt) || process.env.NEXUS_VERBOSE_MQTT === '1' || process.env.NEXUS_VERBOSE_MQTT === 'true';
   if (verboseMqtt) {
-    log.info('listenMqtt', `Starting Nexus MQTT bridge (attempt=${ctx._mqttDiag.attempts}, backoff=${backoff.current||0}ms)`);
+    log.info('listenMqtt', `Starting Nexus MQTT bridge (attempt=${ctx._mqttDiag.attempts}, backoff=${backoff.current || 0}ms)`);
   }
   const runPreflight = shouldRunPreflight(ctx);
   if (runPreflight) {
@@ -378,24 +463,24 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       try {
         await utils.validateSession(ctx, defaultFuncs, { retries: 1, delayMs: 1000 });
         // Session validated successfully
-        if(backoff.consecutiveFails > 0) {
+        if (backoff.consecutiveFails > 0) {
           log.info("listenMqtt", `Session validated OK after ${backoff.consecutiveFails} previous fails, resetting backoff.`);
           backoff.consecutiveFails = 0;
         }
       } catch (e) {
         backoff.consecutiveFails++;
         log.warn("listenMqtt", `Session validation failed (consecutive fails: ${backoff.consecutiveFails})`);
-        
+
         // After many consecutive failures, try proactive cookie refresh
-        if(backoff.consecutiveFails >= 10 && global.__NEXUS_COOKIE_REFRESHER__) {
+        if (backoff.consecutiveFails >= 10 && global.__NEXUS_COOKIE_REFRESHER__) {
           try {
             log.info("listenMqtt", "Triggering proactive cookie refresh after repeated session failures...");
             await global.__NEXUS_COOKIE_REFRESHER__.performRefresh();
-          } catch(refreshErr) {
+          } catch (refreshErr) {
             log.warn("listenMqtt", `Cookie refresh failed: ${refreshErr.message}`);
           }
         }
-        
+
         setTimeout(() => {
           utils.validateSession(ctx, defaultFuncs, { retries: 0 }).catch(err2 => {
             log.error("listenMqtt", "Session invalid after retry: Not logged in.");
@@ -463,7 +548,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
         Upgrade: "websocket",
         "Sec-WebSocket-Version": "13",
         "Accept-Encoding": "gzip, deflate, br",
-  "Accept-Language": (ctx.globalOptions && ctx.globalOptions.acceptLanguage) || process.env.NEXUS_ACCEPT_LANGUAGE || "en-US,en;q=0.9",
+        "Accept-Language": (ctx.globalOptions && ctx.globalOptions.acceptLanguage) || process.env.NEXUS_ACCEPT_LANGUAGE || "en-US,en;q=0.9",
         "Sec-WebSocket-Extensions":
           "permessage-deflate; client_max_window_bits",
       },
@@ -491,7 +576,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   }
   // Create raw WebSocket first so we can attach diagnostics hooks.
   const rawWs = new WebSocket(host, options.wsOptions);
-  try { require('../lib/mqtt/MqttDiagnostics')(rawWs, ctx, log); } catch(_) {}
+  try { require('../lib/mqtt/MqttDiagnostics')(rawWs, ctx, log); } catch (_) { }
   ctx.mqttClient = new mqtt.Client(
     () => buildStream(options, rawWs, buildProxy()),
     options
@@ -505,15 +590,15 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     const errMsg = (err && (err.error || err.message || "")).toString();
     ctx.health.onError(errMsg.includes('not logged in') ? 'not_logged_in' : 'mqtt_error');
     // Increment failure counter for health tracking
-    if(ctx.health && typeof ctx.health.incFailure === 'function') ctx.health.incFailure();
-    if(!errMsg){
-      log.error('listenMqtt', 'Empty error message (mqtt error event). Raw err object: ' + JSON.stringify(Object.getOwnPropertyNames(err || {}).reduce((a,k)=>{a[k]=err[k];return a;},{})));
+    if (ctx.health && typeof ctx.health.incFailure === 'function') ctx.health.incFailure();
+    if (!errMsg) {
+      log.error('listenMqtt', 'Empty error message (mqtt error event). Raw err object: ' + JSON.stringify(Object.getOwnPropertyNames(err || {}).reduce((a, k) => { a[k] = err[k]; return a; }, {})));
     }
     else {
-      log.error('listenMqtt', `MQTT error after ${(Date.now()-attemptStartTs)}ms: ${errMsg}`);
+      log.error('listenMqtt', `MQTT error after ${(Date.now() - attemptStartTs)}ms: ${errMsg}`);
     }
     log.error("listenMqtt", errMsg);
-    try { mqttClient.end(true); } catch(_){ }
+    try { mqttClient.end(true); } catch (_) { }
     if (/not logged in|login_redirect|html_login_page/i.test(errMsg)) {
       ctx.loggedIn = false;
       return globalCallback({ type: "not_logged_in", error: errMsg });
@@ -546,7 +631,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     const shortWindowMs = 5 * 60 * 1000;
     const guard = duration < shortWindowMs ? noteStormEvent(ctx) : getStormGuard(ctx);
     const allowLog = shouldLogStorm(guard);
-    const stormSuffix = guard && guard.active ? ` [storm:${guard.events.length}/${Math.round(guard.windowMs/60000)}m]` : '';
+    const stormSuffix = guard && guard.active ? ` [storm:${guard.events.length}/${Math.round(guard.windowMs / 60000)}m]` : '';
     if (guard && guard.active) {
       scheduleStormRecovery(ctx, api, defaultFuncs, guard);
     }
@@ -576,7 +661,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     }
   });
 
-  mqttClient.on('disconnect', function(){
+  mqttClient.on('disconnect', function () {
     ctx.health.onDisconnect();
     if (ctx.health && typeof ctx.health.incFailure === 'function') { ctx.health.incFailure(); }
     stopForegroundRefresh(ctx);
@@ -587,7 +672,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     const shortWindowMs = 5 * 60 * 1000;
     const guard = duration < shortWindowMs ? noteStormEvent(ctx) : getStormGuard(ctx);
     const allowLog = shouldLogStorm(guard);
-    const stormSuffix = guard && guard.active ? ` [storm:${guard.events.length}/${Math.round(guard.windowMs/60000)}m]` : '';
+    const stormSuffix = guard && guard.active ? ` [storm:${guard.events.length}/${Math.round(guard.windowMs / 60000)}m]` : '';
     if (guard && guard.active) {
       scheduleStormRecovery(ctx, api, defaultFuncs, guard);
     }
@@ -617,6 +702,15 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   });
 
   mqttClient.on("connect", function () {
+    // Mark state as CONNECTED
+    ctx._mqttState.current = 'CONNECTED';
+    ctx._mqttState.reconnectInProgress = false;
+    ctx._mqttState.lastTransition = Date.now();
+
+    if (verboseMqtt) {
+      log.info('listenMqtt', `✅ State transition: CONNECTED`);
+    }
+
     resetBackoff(backoff);
     resetStormGuard(ctx);
     backoff.consecutiveFails = 0;  // Reset consecutive failures on successful connect
@@ -630,17 +724,16 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     ctx.health.onConnect();
 
     // WS3-style randomized proactive reconnect (tunable window).
-    // If globalOptions override is provided, respect that; otherwise
-    // default to a slightly longer window to avoid overlapping too much
-    // with remote/NAT closes.
+    // Changed: 2-4h → 6-8h to reduce unnecessary reconnects and improve stability
+    // Proactive reconnect prevents long-session forced disconnects by Facebook
     if (ctx._reconnectTimer) clearTimeout(ctx._reconnectTimer);
     let reconnectTime = null;
     const opts = ctx.globalOptions || {};
     const proactiveEnabled = opts.mqttProactiveReconnectEnabled;
 
     if (proactiveEnabled !== false) {
-      const minM = Number.isFinite(opts.mqttProactiveReconnectMinMinutes) ? opts.mqttProactiveReconnectMinMinutes : 120; // 2h
-      const maxM = Number.isFinite(opts.mqttProactiveReconnectMaxMinutes) ? opts.mqttProactiveReconnectMaxMinutes : 240; // 4h
+      const minM = Number.isFinite(opts.mqttProactiveReconnectMinMinutes) ? opts.mqttProactiveReconnectMinMinutes : 360; // Changed: 120min → 360min (6h)
+      const maxM = Number.isFinite(opts.mqttProactiveReconnectMaxMinutes) ? opts.mqttProactiveReconnectMaxMinutes : 480; // Changed: 240min → 480min (8h)
       const min = Math.min(minM, maxM);
       const max = Math.max(minM, maxM);
       const intervalMinutes = Math.floor(Math.random() * (max - min + 1)) + min;
@@ -650,16 +743,16 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     if (reconnectTime) {
       if (verboseMqtt) log.info('listenMqtt', `Scheduled proactive reconnect in ${Math.floor(reconnectTime / 60000)} minutes.`);
       ctx._reconnectTimer = setTimeout(() => {
-        log.info('listenMqtt', `Executing proactive proactive reconnect (timer window).`);
+        log.info('listenMqtt', `Executing proactive lifecycle reconnect after ${Math.floor(reconnectTime / 60000)} minutes.`);
         if (ctx.mqttClient) ctx.mqttClient.end(true);
         listenMqtt(defaultFuncs, api, ctx, globalCallback);
       }, reconnectTime);
     }
 
-  if (verboseMqtt) {
-    log.info('listenMqtt', `Nexus MQTT bridge established in ${(Date.now()-attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);
-  }
-    if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch(_) {} }
+    if (verboseMqtt) {
+      log.info('listenMqtt', `Nexus MQTT bridge established in ${(Date.now() - attemptStartTs)}ms (attempt=${ctx._mqttDiag.attempts}).`);
+    }
+    if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch (_) { } }
     // Removed test-only premium features banner
     topics.forEach((topicsub) => mqttClient.subscribe(topicsub));
     var topic;
@@ -702,17 +795,18 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     ctx.tmsWait = function () {
       clearTimeout(rTimeout);
       ctx.globalOptions.emitReady
-        ? globalCallback({
-            type: "ready",
-            error: null,
-          })
+        ? globalCallback(null, {
+          type: "ready",
+          error: null,
+          time: Date.now() // Added timestamp
+        })
         : "";
       delete ctx.tmsWait;
     };
   });
   mqttClient.on("message", function (topic, message, _packet) {
     ctx.health.onMessage();
-    if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch(_) {} }
+    if (ctx.globalSafety) { try { ctx.globalSafety.recordEvent(); } catch (_) { } }
     try {
       let jsonMessage = Buffer.isBuffer(message)
         ? Buffer.from(message).toString()
@@ -722,18 +816,18 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       if (jsonMessage?.message_ack) {
         const ack = jsonMessage.message_ack;
         const mid = ack.message_id || ack.mid;
-        if(mid && ctx._pendingOutbound && ctx._pendingOutbound.has(mid)){
+        if (mid && ctx._pendingOutbound && ctx._pendingOutbound.has(mid)) {
           const started = ctx._pendingOutbound.get(mid);
-            ctx._pendingOutbound.delete(mid);
-            const latency = Date.now() - started;
-            ctx.health.onAck(latency);
+          ctx._pendingOutbound.delete(mid);
+          const latency = Date.now() - started;
+          ctx.health.onAck(latency);
         } else {
           ctx.health.onAck();
         }
         // If this ACK corresponds to an edit, clear from pendingEdits
-        if(mid && ctx.pendingEdits && ctx.pendingEdits.has(mid)){
+        if (mid && ctx.pendingEdits && ctx.pendingEdits.has(mid)) {
           ctx.pendingEdits.delete(mid);
-          if(ctx.health) ctx.health.removePendingEdit(mid);
+          if (ctx.health) ctx.health.removePendingEdit(mid);
         }
       }
       if (jsonMessage?.type === 'ack') { ctx.health.onAck(); }
@@ -758,16 +852,16 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
         if (jsonMessage.firstDeltaSeqId && jsonMessage.syncToken) { ctx.lastSeqId = jsonMessage.firstDeltaSeqId; ctx.syncToken = jsonMessage.syncToken; }
         if (jsonMessage.lastIssuedSeqId) { ctx.lastSeqId = parseInt(jsonMessage.lastIssuedSeqId); }
         for (const i in jsonMessage.deltas) { const delta = jsonMessage.deltas[i]; parseDelta(defaultFuncs, api, ctx, globalCallback, { delta: delta, }); }
-      } else if ( topic === "/thread_typing" || topic === "/orca_typing_notifications" ) {
-        const typ = { type: "typ", isTyping: !!jsonMessage.state, from: jsonMessage.sender_fbid.toString(), threadID: utils.formatID( (jsonMessage.thread || jsonMessage.sender_fbid).toString() ), };
+      } else if (topic === "/thread_typing" || topic === "/orca_typing_notifications") {
+        const typ = { type: "typ", isTyping: !!jsonMessage.state, from: jsonMessage.sender_fbid.toString(), threadID: utils.formatID((jsonMessage.thread || jsonMessage.sender_fbid).toString()), };
         (function () { globalCallback(null, typ); })();
       } else if (topic === "/orca_presence") {
         if (!ctx.globalOptions.updatePresence) { for (const i in jsonMessage.list) { const data = jsonMessage.list[i]; const userID = data["u"]; const presence = { type: "presence", userID: userID.toString(), timestamp: data["l"] * 1000, statuses: data["p"], }; (function () { globalCallback(null, presence); })(); } }
       } else if (topic == "/ls_resp") {
         const parsedPayload = JSON.parse(jsonMessage.payload);
         const reqID = jsonMessage.request_id;
-  // Guard: ctx.tasks may be empty; only proceed if it's a Map and contains the reqID
-  if (ctx.tasks && typeof ctx.tasks.has === 'function' && ctx.tasks.has(reqID)) {
+        // Guard: ctx.tasks may be empty; only proceed if it's a Map and contains the reqID
+        if (ctx.tasks && typeof ctx.tasks.has === 'function' && ctx.tasks.has(reqID)) {
           const taskData = ctx["tasks"].get(reqID);
           const { type: taskType, callback: taskCallback } = taskData;
           const taskRespData = getTaskResponseData(taskType, parsedPayload);
@@ -781,8 +875,8 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       return;
     }
   });
-  mqttClient.on("close", function () { ctx.health.onDisconnect(); if (ctx.globalSafety) { try { ctx.globalSafety._ensureMqttAlive(); } catch(_) {} } });
-  mqttClient.on("disconnect", () => { ctx.health.onDisconnect(); if (ctx.globalSafety) { try { ctx.globalSafety._ensureMqttAlive(); } catch(_) {} } });
+  mqttClient.on("close", function () { ctx.health.onDisconnect(); if (ctx.globalSafety) { try { ctx.globalSafety._ensureMqttAlive(); } catch (_) { } } });
+  mqttClient.on("disconnect", () => { ctx.health.onDisconnect(); if (ctx.globalSafety) { try { ctx.globalSafety._ensureMqttAlive(); } catch (_) { } } });
   // Synthetic keepalive with randomized cadence (55-75s) to appear human and keep state alive
   if (!ctx._syntheticKeepAliveInterval) {
     ctx._syntheticKeepAliveInterval = setInterval(() => {
@@ -791,10 +885,10 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
         const idle = Date.now() - ctx.globalSafety._lastEventTs;
         if (idle > 65 * 1000) { ctx.globalSafety.recordEvent(); ctx.health.onSynthetic(); }
       }
-    }, 55000 + Math.floor(Math.random()*20000));
+    }, 55000 + Math.floor(Math.random() * 20000));
   }
 }
-function scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reason){
+function scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reason) {
   const state = getBackoffState(ctx);
   const guard = getStormGuard(ctx);
   let delay = computeNextDelay(state);
@@ -807,7 +901,7 @@ function scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reaso
   if (guard && guard.active) tags.push('storm');
   const suffix = tags.length ? ` (${tags.join(', ')})` : '';
   log.warn('listenMqtt', `Reconnecting in ${delay} ms (adaptive backoff)${suffix}`);
-  setTimeout(()=>listenMqtt(defaultFuncs, api, ctx, globalCallback), delay);
+  setTimeout(() => listenMqtt(defaultFuncs, api, ctx, globalCallback), delay);
 }
 function getTaskResponseData(taskType, payload) {
   try {
@@ -910,10 +1004,10 @@ function parseDelta(defaultFuncs, api, ctx, globalCallback, { delta }) {
             delta.deltaMessageReply.message === undefined
               ? []
               : delta.deltaMessageReply.message.data === undefined
-              ? []
-              : delta.deltaMessageReply.message.data.prng === undefined
-              ? []
-              : JSON.parse(delta.deltaMessageReply.message.data.prng);
+                ? []
+                : delta.deltaMessageReply.message.data.prng === undefined
+                  ? []
+                  : JSON.parse(delta.deltaMessageReply.message.data.prng);
 
           const m_id = mdata.map((u) => u.i);
           const m_offset = mdata.map((u) => u.o);
@@ -929,9 +1023,9 @@ function parseDelta(defaultFuncs, api, ctx, globalCallback, { delta }) {
             threadID: (delta.deltaMessageReply.message.messageMetadata.threadKey
               .threadFbId
               ? delta.deltaMessageReply.message.messageMetadata.threadKey
-                  .threadFbId
+                .threadFbId
               : delta.deltaMessageReply.message.messageMetadata.threadKey
-                  .otherUserFbId
+                .otherUserFbId
             ).toString(),
             messageID:
               delta.deltaMessageReply.message.messageMetadata.messageId,
@@ -974,13 +1068,13 @@ function parseDelta(defaultFuncs, api, ctx, globalCallback, { delta }) {
               delta.deltaMessageReply.repliedToMessage === undefined
                 ? []
                 : delta.deltaMessageReply.repliedToMessage.data === undefined
-                ? []
-                : delta.deltaMessageReply.repliedToMessage.data.prng ===
-                  undefined
-                ? []
-                : JSON.parse(
-                    delta.deltaMessageReply.repliedToMessage.data.prng
-                  );
+                  ? []
+                  : delta.deltaMessageReply.repliedToMessage.data.prng ===
+                    undefined
+                    ? []
+                    : JSON.parse(
+                      delta.deltaMessageReply.repliedToMessage.data.prng
+                    );
             const m_id = mdata.map((u) => u.i);
             const m_offset = mdata.map((u) => u.o);
             const m_length = mdata.map((u) => u.l);
@@ -994,9 +1088,9 @@ function parseDelta(defaultFuncs, api, ctx, globalCallback, { delta }) {
               threadID: (delta.deltaMessageReply.repliedToMessage
                 .messageMetadata.threadKey.threadFbId
                 ? delta.deltaMessageReply.repliedToMessage.messageMetadata
-                    .threadKey.threadFbId
+                  .threadKey.threadFbId
                 : delta.deltaMessageReply.repliedToMessage.messageMetadata
-                    .threadKey.otherUserFbId
+                  .threadKey.otherUserFbId
               ).toString(),
               messageID:
                 delta.deltaMessageReply.repliedToMessage.messageMetadata
@@ -1216,37 +1310,37 @@ function parseDelta(defaultFuncs, api, ctx, globalCallback, { delta }) {
                 case "ThreadImageMessage":
                   (!ctx.globalOptions.selfListen &&
                     fetchData.message_sender.id.toString() === ctx.userID) ||
-                  !ctx.loggedIn
+                    !ctx.loggedIn
                     ? undefined
                     : (function () {
-                        globalCallback(null, {
-                          type: "event",
-                          threadID: utils.formatID(tid.toString()),
-                          logMessageType: "log:thread-image",
-                          logMessageData: {
-                            image: {
-                              attachmentID:
-                                fetchData.image_with_metadata &&
-                                fetchData.image_with_metadata
-                                  .legacy_attachment_id,
-                              width:
-                                fetchData.image_with_metadata &&
-                                fetchData.image_with_metadata
-                                  .original_dimensions.x,
-                              height:
-                                fetchData.image_with_metadata &&
-                                fetchData.image_with_metadata
-                                  .original_dimensions.y,
-                              url:
-                                fetchData.image_with_metadata &&
-                                fetchData.image_with_metadata.preview.uri,
-                            },
+                      globalCallback(null, {
+                        type: "event",
+                        threadID: utils.formatID(tid.toString()),
+                        logMessageType: "log:thread-image",
+                        logMessageData: {
+                          image: {
+                            attachmentID:
+                              fetchData.image_with_metadata &&
+                              fetchData.image_with_metadata
+                                .legacy_attachment_id,
+                            width:
+                              fetchData.image_with_metadata &&
+                              fetchData.image_with_metadata
+                                .original_dimensions.x,
+                            height:
+                              fetchData.image_with_metadata &&
+                              fetchData.image_with_metadata
+                                .original_dimensions.y,
+                            url:
+                              fetchData.image_with_metadata &&
+                              fetchData.image_with_metadata.preview.uri,
                           },
-                          logMessageBody: fetchData.snippet,
-                          timestamp: fetchData.timestamp_precise,
-                          author: fetchData.message_sender.id,
-                        });
-                      })();
+                        },
+                        logMessageBody: fetchData.snippet,
+                        timestamp: fetchData.timestamp_precise,
+                        author: fetchData.message_sender.id,
+                      });
+                    })();
                   break;
                 case "UserMessage": {
                   const event = {
@@ -1391,7 +1485,7 @@ module.exports = function (defaultFuncs, api, ctx) {
   return function (callback) {
     class MessageEmitter extends EventEmitter {
       stopListening(callback) {
-        callback = callback || (() => {});
+        callback = callback || (() => { });
         globalCallback = identity;
         if (ctx._reconnectTimer) clearTimeout(ctx._reconnectTimer);
         if (ctx.mqttClient) {

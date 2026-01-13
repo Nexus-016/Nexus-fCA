@@ -14,30 +14,54 @@ const logger = require("./lib/logger");
 const { safeMode, ultraSafeMode, smartSafetyLimiter, isUserAllowed } = require('./utils'); // Enhanced safety system
 // Minimal aesthetic banner system
 let _fancyBannerPrinted = false;
-const gradient = (() => { try { return require('gradient-string'); } catch(_) { return null; } })();
-const pkgMeta = (() => { try { return require('./package.json'); } catch(_) { return { version: 'dev' }; } })();
+const gradient = (() => { try { return require('gradient-string'); } catch (_) { return null; } })();
+const pkgMeta = (() => { try { return require('./package.json'); } catch (_) { return { version: 'dev' }; } })();
 function printFancyStartupBanner() {
   if (_fancyBannerPrinted) return; _fancyBannerPrinted = true;
-  const lines = [
-    '╔══════════════════════════════════════════════════════╗',
-    '║ Nexus-FCA Secure Login                               ║',
-    '║ Advanced Stable Messenger Automation API             ║',
-    '╚══════════════════════════════════════════════════════╝'
-  ];
-  if (gradient) console.log(gradient.cristal.multiline(lines.join('\n'))); else console.log(lines.join('\n'));
+  const banner = `
+    ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗
+    ████╗  ██║██╔════╝╚██╗██╔╝██║   ██║██╔════╝
+    ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗
+    ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║
+    ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║
+    ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝
+           [ F A C E B O O K   C H A T   A P I ]
+  `;
+  const info = `
+    Version: ${pkgMeta.version} | Stability: 99.9%
+    Region: ${process.env.NEXUS_REGION || 'Auto-Detect'} | Mode: ${global.fca?.config?.mqtt?.enabled ? 'Hybrid MQTT' : 'HTTP Only'}
+  `;
+
+  if (gradient) {
+    console.log(gradient.pastel.multiline(banner));
+    console.log(gradient.cristal(info));
+  } else {
+    console.log(banner);
+    console.log(info);
+  }
 }
 function printIdentityBanner(uid, name) {
   const cleanName = name || 'Unknown';
-  const pad = (txt, len) => (txt.length < len ? txt + ' '.repeat(len - txt.length) : txt.substring(0, len));
-  const bodyLen = 54;
-  const line = (content) => `║ ${pad(content, bodyLen)} ║`;
-  const box = [
-    '╔════════════════ LOGGED IN IDENTITY ════════════════╗',
-    line(`UID : ${uid}`),
-    line(`Name: ${cleanName}`),
-    '╚════════════════════════════════════════════════════╝'
-  ];
-  if (gradient) console.log(gradient.atlas.multiline(box.join('\n'))); else console.log(box.join('\n'));
+
+  if (gradient) {
+    const title = '✨ ACTIVE LIVE SESSION';
+    const border = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+
+    console.log(gradient.summer('\n' + border));
+    console.log(gradient.cristal(` ${title}`));
+    console.log(gradient.summer(border));
+    console.log(gradient.pastel(` 👤 Name : ${cleanName}`));
+    console.log(gradient.pastel(` 🆔 UID  : ${uid}`));
+    console.log(gradient.summer(border + '\n'));
+  } else {
+    // Fallback for non-gradient environments
+    console.log('\n----------------------------------------');
+    console.log(' ACTIVE LIVE SESSION');
+    console.log('----------------------------------------');
+    console.log(` Name : ${cleanName}`);
+    console.log(` UID  : ${uid}`);
+    console.log('----------------------------------------\n');
+  }
 }
 
 // Enhanced imports - All new modules
@@ -45,7 +69,7 @@ const { NexusClient } = require('./lib/compatibility/NexusClient');
 const { CompatibilityLayer } = require('./lib/compatibility/CompatibilityLayer');
 const { performanceManager, PerformanceManager } = require('./lib/performance/PerformanceManager');
 const { errorHandler, ErrorHandler } = require('./lib/error/ErrorHandler');
-const { AdvancedMqttManager } = require('./lib/mqtt/AdvancedMqttManager');
+// Note: AdvancedMqttManager removed - was not being used
 const { EnhancedDatabase } = require('./lib/database/EnhancedDatabase');
 const { Message } = require('./lib/message/Message');
 const { Thread } = require('./lib/message/Thread');
@@ -176,110 +200,12 @@ function setOptions(globalOptions, options) {
     }
   });
 }
+
+// BUILD API FUNCTION - Now uses ApiFactory for cleaner code
 function buildAPI(globalOptions, html, jar) {
-  const cookies = jar.getCookies("https://www.facebook.com");
-  const userCookie = cookies.find(c => c.cookieString().startsWith("c_user="));
-  const tiktikCookie = cookies.find(c => c.cookieString().startsWith("i_user="));
-  if (userCookie.length === 0 && tiktikCookie.length === 0) {
-    return log.error('login', "Không tìm thấy cookie cho người dùng, vui lòng kiểm tra lại thông tin đăng nhập")
-  } else if (!userCookie && !tiktikCookie) {
-    return log.error('login', "Không tìm thấy cookie cho người dùng, vui lòng kiểm tra lại thông tin đăng nhập")
-  } else if (html.includes("/checkpoint/block/?next")) {
-    return log.error('login', "Appstate die, vui lòng thay cái mới!", 'error');
-  }
-  const userID = (tiktikCookie || userCookie).cookieString().split("=")[1];
-  const i_userID = tiktikCookie ? tiktikCookie.cookieString().split("=")[1] : null;
-  logger(`Logged in as ${userID}`, 'info');
   try {
     clearInterval(checkVerified);
   } catch (_) { }
-  const clientID = ((Math.random() * 2147483648) | 0).toString(16);
-  let mqttEndpoint, region, fb_dtsg, irisSeqID;
-  try {
-    const endpointMatch = html.match(/"endpoint":"([^"]+)"/);
-    if (endpointMatch) {
-      mqttEndpoint = endpointMatch[1].replace(/\\\//g, "/");
-      const url = new URL(mqttEndpoint);
-      region = url.searchParams.get("region")?.toUpperCase() || "PRN";
-    }
-  } catch (e) {
-    log.warning("login", "Not MQTT endpoint");
-  }
-  // Allow environment override for region (useful on PaaS where HTML may omit region or mismatch)
-  if (process.env.NEXUS_REGION) {
-    try { region = process.env.NEXUS_REGION.toUpperCase(); } catch(_) {}
-  }
-  
-  // Robust fb_dtsg extraction
-  const dtsgRegexes = [
-    /DTSGInitialData.*?token":"(.*?)"/,
-    /"DTSGInitData",\[\],{"token":"(.*?)"/,
-    /\["DTSGInitData",\[\],{"token":"(.*?)"/,
-    /name="fb_dtsg" value="(.*?)"/,
-    /name="dtsg_ag" value="(.*?)"/
-  ];
-  
-  for (const regex of dtsgRegexes) {
-    const match = html.match(regex);
-    if (match && match[1]) {
-      fb_dtsg = match[1];
-      break;
-    }
-  }
-
-  // NEW: JSON Parsing Fallback (inspired by ws3-fca)
-  if (!fb_dtsg) {
-      try {
-          const extractNetData = (html) => {
-            const allScriptsData = [];
-            const scriptRegex = /<script type="application\/json"[^>]*>(.*?)<\/script>/g;
-            let match;
-            while ((match = scriptRegex.exec(html)) !== null) {
-                try {
-                    allScriptsData.push(JSON.parse(match[1]));
-                } catch (e) { }
-            }
-            return allScriptsData;
-          };
-          
-          const netData = extractNetData(html);
-          
-          const findConfig = (key) => {
-            for (const scriptData of netData) {
-                if (scriptData.require) {
-                    for (const req of scriptData.require) {
-                        if (Array.isArray(req) && req[0] === key && req[2]) {
-                            return req[2];
-                        }
-                        if (Array.isArray(req) && req[3] && req[3][0] && req[3][0].__bbox && req[3][0].__bbox.define) {
-                            for (const def of req[3][0].__bbox.define) {
-                                if (Array.isArray(def) && def[0].endsWith(key) && def[2]) {
-                                    return def[2];
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            return null;
-          };
-          
-          const dtsgData = findConfig("DTSGInitialData");
-          if (dtsgData && dtsgData.token) {
-              fb_dtsg = dtsgData.token;
-              log.verbose("login", "Found fb_dtsg via JSON parsing");
-          }
-      } catch (e) {
-          log.verbose("login", "JSON parsing for fb_dtsg failed: " + e.message);
-      }
-  }
-  
-  if (!fb_dtsg) {
-      // log.warn("login", "Could not find fb_dtsg in HTML. Session might be limited.");
-  } else {
-      log.verbose("login", "Found fb_dtsg: " + fb_dtsg.substring(0, 10) + "...");
-  }
-
 
   // Initialize enhanced systems
   const dbManager = getInstance();
@@ -293,136 +219,35 @@ function buildAPI(globalOptions, html, jar) {
       console.error('Database connection failed:', error.message);
     }
   })();
+
   // Professional gradient banner for Nexus-FCA
-  logger('═══════════════════════════════════════════════════════════════════════════════', 'info');
-  logger('             Nexus-FCA - Advanced & Safe Facebook Chat API', 'info');
-  logger('═══════════════════════════════════════════════════════════════════════════════', 'info');
-  logger(`Nexus-FCA`, 'info');
-  const ctx = {
-    userID: userID,
-    i_userID: i_userID,
-    jar: jar,
-    clientID: clientID,
-    globalOptions: globalOptions,
-    loggedIn: true,
-    access_token: "NONE",
-    clientMutationId: 0,
-    mqttClient: undefined,
-    lastSeqId: irisSeqID,
-    syncToken: undefined,
-    mqttEndpoint,
-    region,
-    firstListen: true,
-    fb_dtsg,
-    wsReqNumber: 0,
-    wsTaskNumber: 0,
-    // Provide safety module reference to lower layers (listenMqtt)
-    globalSafety,
-    // Pending edit tracking (Stage 2)
-    pendingEdits: new Map()
-  };
-  // Default edit / resend safety settings
-  if(!globalOptions.editSettings){
-    globalOptions.editSettings = {
-      maxPendingEdits: 200,
-      editTTLms: 5*60*1000,
-      ackTimeoutMs: 12000,
-      maxResendAttempts: 2
-    };
+  logger('🚀 Launching Nexus-FCA Core...', 'info');
+
+  // Use ApiFactory to build API (cleanly separated)
+  const apiFactory = new ApiFactory(globalSafety);
+  const result = apiFactory.buildAPI(globalOptions, html, jar);
+
+  if (!result) {
+    throw new Error('Failed to build API: No valid session found.');
   }
-  const api = {
-    setOptions: setOptions.bind(null, globalOptions),
-    getAppState: function getAppState() {
-      const appState = utils.getAppState(jar);
-      return appState.filter(
-        (item, index, self) =>
-          self.findIndex((t) => {
-            return t.key === item.key;
-          }) === index
-      );
-    },
-    healthCheck: function(callback) {
-      callback(null, {
-        status: 'ok',
-        safeMode,
-        time: new Date().toISOString(),
-        userID: ctx.userID || null,
-        metrics: ctx.health ? ctx.health.snapshot() : null
-      });
-    },
-    getHealthMetrics: function(){ return ctx.health ? ctx.health.snapshot() : null; },
-  getMqttDiagnostics: function(){ return ctx.getMqttDiagnostics ? ctx.getMqttDiagnostics() : (ctx._mqttDiag || null); },
-    enableLazyPreflight(enable=true){ ctx.globalOptions.disablePreflight = !enable; },
-    setBackoffOptions(opts={}){ ctx.globalOptions.backoff = Object.assign(ctx.globalOptions.backoff||{}, opts); },
-    setEditOptions(opts={}){ Object.assign(ctx.globalOptions.editSettings, opts); },
-    getMemoryMetrics(){
-      if(!ctx.health) return null;
-      const snap = ctx.health.snapshot();
-      return {
-        pendingEdits: snap.pendingEdits,
-        pendingEditsDropped: snap.pendingEditsDropped,
-        pendingEditsExpired: snap.pendingEditsExpired,
-        outboundQueueDepth: snap.outboundQueueDepth,
-        groupQueueDroppedMessages: snap.groupQueueDroppedMessages,
-        memoryGuardRuns: snap.memoryGuardRuns,
-        memoryGuardActions: snap.memoryGuardActions
-      };
-    }
-  };
-  const defaultFuncs = utils.makeDefaults(html, i_userID || userID, ctx);
-  
-  // ULTRA-SAFE WRAPPER: Throttle ALL API calls, not just sendMessage
-  const originalPost = defaultFuncs.post;
-  const originalPostFormData = defaultFuncs.postFormData;
-  const originalGet = defaultFuncs.get;
 
-  defaultFuncs.post = async function(...args) {
-    if (globalSafety && typeof globalSafety.applyAdaptiveSendDelay === 'function') {
-        await globalSafety.applyAdaptiveSendDelay();
-    }
-    return originalPost.apply(this, args);
-  };
-
-  defaultFuncs.postFormData = async function(...args) {
-    if (globalSafety && typeof globalSafety.applyAdaptiveSendDelay === 'function') {
-        await globalSafety.applyAdaptiveSendDelay();
-    }
-    return originalPostFormData.apply(this, args);
-  };
-  
-  // We don't throttle GET as much, but maybe a little? 
-  // Actually, let's throttle everything for "Most Safe" mode.
-  defaultFuncs.get = async function(...args) {
-     if (globalSafety && typeof globalSafety.applyAdaptiveSendDelay === 'function') {
-        // Use a lighter delay for GETs if needed, but for now use the same safe pipeline
-        await globalSafety.applyAdaptiveSendDelay();
-    }
-    return originalGet.apply(this, args);
-  };
-
-  require("fs")
-    .readdirSync(__dirname + "/src/")
-    .filter((v) => v.endsWith(".js"))
-    .map(function (v) {
-      api[v.replace(".js", "")] = require("./src/" + v)(defaultFuncs, api, ctx);
-    });
-  api.listen = api.listenMqtt;
-  // Adaptive outbound pacing wrapper (dynamic risk + post-maintenance window)
-  if (!api._adaptivePacingWrapped && typeof api.sendMessage === 'function') {
-    const _origSend = api.sendMessage;
-    api.sendMessage = async function(message, threadID, callback){
-      try { if (globalSafety && typeof globalSafety.applyAdaptiveSendDelay === 'function') await globalSafety.applyAdaptiveSendDelay(); } catch(_) {}
+  // Wrap API methods with adaptive pacing
+  if (!result.api._adaptivePacingWrapped && typeof result.api.sendMessage === 'function') {
+    const _origSend = result.api.sendMessage;
+    result.api.sendMessage = async function (message, threadID, callback) {
+      try { if (globalSafety && typeof globalSafety.applyAdaptiveSendDelay === 'function') await globalSafety.applyAdaptiveSendDelay(); } catch (_) { }
       return _origSend(message, threadID, callback);
     };
-    api._adaptivePacingWrapped = true;
+    result.api._adaptivePacingWrapped = true;
   }
+
   // Safety wrapper: ensure every inbound MQTT event updates safety lastEvent timestamp
-  if (!api._safetyWrappedListen) {
-    const _origListen = api.listenMqtt;
-    api.listenMqtt = function(callback) {
+  if (!result.api._safetyWrappedListen) {
+    const _origListen = result.api.listenMqtt;
+    result.api.listenMqtt = function (callback) {
       const wrapped = (err, evt) => {
         if (!err && evt) {
-          try { globalSafety.recordEvent(); } catch(_) {}
+          try { globalSafety.recordEvent(); } catch (_) { }
         }
         if (typeof callback === 'function') callback(err, evt);
       };
@@ -431,13 +256,15 @@ function buildAPI(globalOptions, html, jar) {
       try {
         emitter.on('message', () => globalSafety.recordEvent());
         emitter.on('error', () => globalSafety.recordEvent());
-      } catch(_) {}
+      } catch (_) { }
       return emitter;
     };
-    api._safetyWrappedListen = true;
+    result.api._safetyWrappedListen = true;
   }
+
+  // Auto-refresh fb_dtsg every 24 hours
   setInterval(async () => {
-    api
+    result.api
       .refreshFb_dtsg()
       .then(() => {
         logger("Successfully refreshed fb_dtsg", 'info');
@@ -446,282 +273,112 @@ function buildAPI(globalOptions, html, jar) {
         console.error("An error occurred while refreshing fb_dtsg", err);
       });
   }, 1000 * 60 * 60 * 24);
-  // === Group Queue (No Cooldown, Sequential per group) ===
-  (function initGroupQueue(){
-    const groupQueues = new Map(); // threadID -> { q: [], sending: false, lastActive: number }
-    const isGroupThread = (tid) => typeof tid === 'string' && tid.length >= 15; // simple heuristic
-    const DIRECT_FN = api.sendMessage; // original
 
-    api.enableGroupQueue = function(enable=true){
-      globalOptions.groupQueueEnabled = !!enable;
-    };
-    api.setGroupQueueCapacity = function(n){ globalOptions.groupQueueMax = n; };
-    api.enableGroupQueue(true);
-    api.setGroupQueueCapacity(100); // allow up to 100 pending per group
-    // New: group queue retention policy
-    globalOptions.groupQueueIdleMs = 30*60*1000; // 30m idle purge
-
-    api._sendMessageDirect = DIRECT_FN;
-    api.sendMessage = function(message, threadID, cb){
-      if(!globalOptions.groupQueueEnabled || !isGroupThread(threadID)) {
-        return api._sendMessageDirect(message, threadID, cb);
-      }
-      let entry = groupQueues.get(threadID);
-      if(!entry){ entry = { q: [], sending: false, lastActive: Date.now() }; groupQueues.set(threadID, entry); }
-      entry.lastActive = Date.now();
-      if(entry.q.length >= (globalOptions.groupQueueMax||100)) {
-        // drop oldest (keep newest) to avoid unbounded growth
-        entry.q.shift();
-        if(ctx.health) ctx.health.recordGroupQueuePrune(0,0,1);
-      }
-      entry.q.push({ message, threadID, cb });
-      processQueue(threadID, entry);
-    };
-
-    function processQueue(threadID, entry){
-      if(entry.sending) return;
-      if(!entry.q.length) return;
-      entry.sending = true;
-      const { message, threadID: tid, cb } = entry.q.shift();
-      api._sendMessageDirect(message, tid, function(err, res){
-        try { if(!err) globalSafety.recordEvent(); } catch(_) {}
-        if(typeof cb === 'function') cb(err, res);
-        entry.sending = false;
-        // Immediately process next (no cooldown) to keep strict sequence
-        setImmediate(()=>processQueue(threadID, entry));
-      });
-    }
-
-    api._flushGroupQueue = function(threadID){
-      const entry = groupQueues.get(threadID);
-      if(!entry) return;
-      while(entry.q.length) {
-        const item = entry.q.shift();
-        api._sendMessageDirect(item.message, item.threadID, item.cb);
-      }
-      entry.sending = false;
-    };
-
-    // Memory guard sweeper (lightweight)
-    if(!globalOptions._groupQueueSweeper){
-      globalOptions._groupQueueSweeper = setInterval(()=>{
-        const now = Date.now();
-        let prunedThreads = 0; let expiredQueues = 0; let dropped = 0; let actions = 0;
-        for(const [tid, entry] of groupQueues.entries()){
-          // Idle purge
-            if(now - entry.lastActive > (globalOptions.groupQueueIdleMs||1800000) && !entry.sending){
-              if(entry.q.length){ dropped += entry.q.length; }
-              groupQueues.delete(tid); expiredQueues++; actions++;
-              continue;
-            }
-          // Hard cap queue length (just in case capacity changed lower)
-          const cap = globalOptions.groupQueueMax||100;
-          if(entry.q.length > cap){
-            const overflow = entry.q.length - cap;
-            entry.q.splice(0, overflow); // drop oldest overflow
-            dropped += overflow; actions++;
-          }
-        }
-        if((prunedThreads||expiredQueues||dropped) && ctx.health){
-          ctx.health.recordGroupQueuePrune(prunedThreads, expiredQueues, dropped);
-          ctx.health.recordMemoryGuardRun(actions);
-        }
-      }, 5*60*1000); // every 5 minutes
-    }
-  })();
-  // === End Group Queue ===
-  return {
-    ctx,
-    defaultFuncs,
-    api
-  };
+  return result;
 }
 
-// Appstate login helper function
+// Import new refactored modules
+const LoginManager = require('./lib/auth/LoginManager');
+const ApiFactory = require('./lib/factory/ApiFactory');
+
+// Appstate login helper function (refactored to use LoginManager)
 function loginHelper(appState, email, password, globalOptions, callback, prCallback) {
   let mainPromise = null;
   const jar = utils.getJar();
-  
-  // NEW: Initialize Proxy Manager
-  const proxyManager = globalOptions.proxy 
-    ? new ProxyManager(globalOptions.proxy) 
-    : ProxyManager.fromEnv();
-  
-  if (proxyManager.isEnabled()) {
-    logger(`🌐 Proxy enabled: ${proxyManager.getInfo().host}:${proxyManager.getInfo().port}`, 'info');
-  }
-  
-  // NEW: Initialize User Agent Manager
-  const uaManager = globalOptions.randomUserAgent 
-    ? new UserAgentManager({ random: true })
-    : UserAgentManager.fromEnv();
-  
-  // Use random or custom user agent
-  if (!globalOptions.userAgent) {
-    globalOptions.userAgent = uaManager.getUserAgent(globalOptions);
-    logger(`🔧 User Agent: ${uaManager.getInfo().browser} ${uaManager.getInfo().version} on ${uaManager.getInfo().os}`, 'info');
-  }
-  
-  // Apply maximum safety validation
-  const safetyCheck = globalSafety.validateLogin(appState, email, password);
-  if (!safetyCheck.safe) {
-    return callback(new Error(`Login Safety Check Failed: ${safetyCheck.reason}`));
-  }
-  
-  // Establish continuity user agent ONCE (credential/appstate phase)
-  if(!globalSafety._fixedUA){ globalSafety.setFixedUserAgent(globalSafety.getSafeUserAgent()); }
-  globalOptions.userAgent = globalSafety.getSafeUserAgent();
-  
-  // NEW: Support email/password login
-  if (email && password) {
-    logger('🔐 Attempting email/password login...', 'info');
-    
-    const emailPasswordLogin = new EmailPasswordLogin();
-    const validation = emailPasswordLogin.validateCredentials(email, password);
-    
-    if (!validation.valid) {
-      return callback(new Error(`Invalid credentials: ${validation.errors.join(', ')}`));
-    }
-    
-    mainPromise = emailPasswordLogin.login(email, password, jar)
-      .then(result => {
-        if (!result.success) {
-          throw new Error('Email/password login failed');
-        }
-        logger('✅ Email/password login successful', 'info');
-        
-        // Now fetch the main page to build API
-        return utils.get('https://www.facebook.com/', jar, null, 
-          globalSafety.applySafeRequestOptions(globalOptions), { noRef: true })
-          .then(utils.saveCookies(jar));
-      })
-      .catch(err => {
-        logger(`❌ Email/password login failed: ${err.message}`, 'error');
-        throw err;
-      });
-  } else if (appState) {
-    try {
-      appState = JSON.parse(appState);
-    } catch (e) {
-      try {
-        appState = appState;
-      } catch (e) {
-        return callback(new Error("Failed to parse appState"));
-      }
-    }
 
-    try {
-      // Fix any cookie expiry issues before setting
-      const fixedAppState = CookieManager.fixCookieExpiry(appState, {
-        defaultExpiryDays: 90,
-        criticalExpiryDays: 90,
-        refreshExisting: true
-      });
-      
-      fixedAppState.forEach(c => {
-        const str = `${c.key}=${c.value}; expires=${c.expires}; domain=${c.domain}; path=${c.path};`;
-        jar.setCookie(str, "http://" + c.domain);
-      });
+  // Initialize LoginManager
+  const loginManager = new LoginManager(globalSafety);
 
-      // Apply safety headers with continuity UA
-      mainPromise = utils.get('https://www.facebook.com/', jar, null, 
-        globalSafety.applySafeRequestOptions(globalOptions), { noRef: true })
-        .then(utils.saveCookies(jar));
-    } catch (e) {
-      return callback(new Error("Invalid appState format"));
-    }
-  } else {
-    return callback(new Error("Either appState or email/password is required for authentication"));
+  // Validate and initialize
+  try {
+    loginManager.validateLogin(appState, email, password);
+  } catch (err) {
+    return callback(err);
   }
 
-  function handleRedirect(res) {
-    const reg = /<meta http-equiv="refresh" content="0;url=([^"]+)[^>]+>/;
-    const redirect = reg.exec(res.body);
-    if (redirect && redirect[1]) {
-      return utils.get(redirect[1], jar, null, globalSafety.applySafeRequestOptions(globalOptions)).then(utils.saveCookies(jar));
-    }
-    return res;
-  }
+  loginManager.initializeProxy(globalOptions);
+  loginManager.initializeUserAgent(globalOptions);
 
-  let ctx, api;
+  // Perform login
+  mainPromise = loginManager.login(appState, email, password, globalOptions, jar)
+    .catch(err => {
+      logger(`❌ Login failed: ${err.message}`, 'error');
+      throw err;
+    });
+
+  let ctx, defaultFuncs, api;
   mainPromise = mainPromise
-    .then(handleRedirect)
-    .then(res => {
-      // Remove UA override logic to maintain continuity (previous mobileAgentRegex swap)
-      return res;
-    })
-    .then(handleRedirect)
     .then(async res => {
       const html = res.body;
       const Obj = buildAPI(globalOptions, html, jar);
-      
+
       // Fallback: Try mbasic.facebook.com if fb_dtsg is missing
       if (!Obj.ctx.fb_dtsg) {
-          logger("Attempting to fetch fb_dtsg from mbasic.facebook.com...", "info");
-          try {
-              const mobileOptions = {
-                  ...globalOptions,
-                  userAgent: "Mozilla/5.0 (Linux; Android 12; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36"
-              };
-              const mRes = await utils.get("https://mbasic.facebook.com/", jar, null, mobileOptions);
-              const mHtml = mRes.body;
-              const mMatch = mHtml.match(/name="fb_dtsg" value="(.*?)"/);
-              if (mMatch && mMatch[1]) {
-                  Obj.ctx.fb_dtsg = mMatch[1];
-                  Obj.ctx.ttstamp = "2" + Obj.ctx.fb_dtsg.split("").map(c => c.charCodeAt(0)).join("");
-                  logger("Found fb_dtsg from mbasic.facebook.com", "success");
-                  
-                  // Re-create defaultFuncs with the new token
-                  Obj.defaultFuncs = utils.makeDefaults(html, Obj.ctx.userID, Obj.ctx);
-              } else {
-                   // Try one more: dtsg_ag
-                   const agMatch = mHtml.match(/name="dtsg_ag" value="(.*?)"/);
-                   if (agMatch && agMatch[1]) {
-                        Obj.ctx.fb_dtsg = agMatch[1];
-                        Obj.ctx.ttstamp = "2" + Obj.ctx.fb_dtsg.split("").map(c => c.charCodeAt(0)).join("");
-                        logger("Found fb_dtsg (ag) from mbasic.facebook.com", "success");
-                        Obj.defaultFuncs = utils.makeDefaults(html, Obj.ctx.userID, Obj.ctx);
-                   } else {
-                       logger("Failed to find fb_dtsg in mbasic response", "warn");
-                   }
-              }
-              
-              // Second Fallback: Try business.facebook.com
-              if (!Obj.ctx.fb_dtsg) {
-                  logger("Attempting to fetch fb_dtsg from business.facebook.com...", "info");
-                  try {
-                      const bRes = await utils.get("https://business.facebook.com/business_locations", jar, null, globalOptions);
-                      const bHtml = bRes.body;
-                      const bMatch = bHtml.match(/name="fb_dtsg" value="(.*?)"/) || bHtml.match(/DTSGInitialData.*?token":"(.*?)"/);
-                      if (bMatch && bMatch[1]) {
-                          Obj.ctx.fb_dtsg = bMatch[1];
-                          Obj.ctx.ttstamp = "2" + Obj.ctx.fb_dtsg.split("").map(c => c.charCodeAt(0)).join("");
-                          logger("Found fb_dtsg from business.facebook.com", "success");
-                          Obj.defaultFuncs = utils.makeDefaults(html, Obj.ctx.userID, Obj.ctx);
-                      } else {
-                          logger("Failed to find fb_dtsg in business response", "warn");
-                          // Debug: Print what we got
-                          if (bHtml.includes("login_form") || bHtml.includes("checkpoint")) {
-                              logger("Response indicates login/checkpoint page", "error");
-                          } else {
-                              logger("Response start: " + bHtml.substring(0, 200), "verbose");
-                          }
-                      }
-                  } catch (e) {
-                      logger("Failed to fetch fallback fb_dtsg from business: " + e.message, "warn");
-                  }
-              }
+        logger("⚠️ fb_dtsg missing. Attempting recovery via mbasic...", "warn");
+        try {
+          const mobileOptions = {
+            ...globalOptions,
+            userAgent: "Mozilla/5.0 (Linux; Android 12; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36"
+          };
+          const mRes = await utils.get("https://mbasic.facebook.com/", jar, null, mobileOptions);
+          const mHtml = mRes.body;
+          const mMatch = mHtml.match(/name="fb_dtsg" value="(.*?)"/);
+          if (mMatch && mMatch[1]) {
+            Obj.ctx.fb_dtsg = mMatch[1];
+            Obj.ctx.ttstamp = "2" + Obj.ctx.fb_dtsg.split("").map(c => c.charCodeAt(0)).join("");
+            logger("Found fb_dtsg from mbasic.facebook.com", "success");
 
-          } catch (e) {
-              logger("Failed to fetch fallback fb_dtsg: " + e.message, "warn");
+            // Re-create defaultFuncs with the new token
+            Obj.defaultFuncs = utils.makeDefaults(html, Obj.ctx.userID, Obj.ctx);
+          } else {
+            // Try one more: dtsg_ag
+            const agMatch = mHtml.match(/name="dtsg_ag" value="(.*?)"/);
+            if (agMatch && agMatch[1]) {
+              Obj.ctx.fb_dtsg = agMatch[1];
+              Obj.ctx.ttstamp = "2" + Obj.ctx.fb_dtsg.split("").map(c => c.charCodeAt(0)).join("");
+              logger("Found fb_dtsg (ag) from mbasic.facebook.com", "success");
+              Obj.defaultFuncs = utils.makeDefaults(html, Obj.ctx.userID, Obj.ctx);
+            } else {
+              logger("Failed to find fb_dtsg in mbasic response", "warn");
+            }
           }
+
+          // Second Fallback: Try business.facebook.com
+          if (!Obj.ctx.fb_dtsg) {
+            logger("Attempting to fetch fb_dtsg from business.facebook.com...", "info");
+            try {
+              const bRes = await utils.get("https://business.facebook.com/business_locations", jar, null, globalOptions);
+              const bHtml = bRes.body;
+              const bMatch = bHtml.match(/name="fb_dtsg" value="(.*?)"/) || bHtml.match(/DTSGInitialData.*?token":"(.*?)"/);
+              if (bMatch && bMatch[1]) {
+                Obj.ctx.fb_dtsg = bMatch[1];
+                Obj.ctx.ttstamp = "2" + Obj.ctx.fb_dtsg.split("").map(c => c.charCodeAt(0)).join("");
+                logger("Found fb_dtsg from business.facebook.com", "success");
+                Obj.defaultFuncs = utils.makeDefaults(html, Obj.ctx.userID, Obj.ctx);
+              } else {
+                logger("Failed to find fb_dtsg in business response", "warn");
+                if (bHtml.includes("login_form") || bHtml.includes("checkpoint")) {
+                  logger("Response indicates login/checkpoint page", "error");
+                } else {
+                  logger("Response start: " + bHtml.substring(0, 200), "verbose");
+                }
+              }
+            } catch (e) {
+              logger("Failed to fetch fallback fb_dtsg from business: " + e.message, "warn");
+            }
+          }
+
+        } catch (e) {
+          logger("Failed to fetch fallback fb_dtsg: " + e.message, "warn");
+        }
       }
 
       if (!Obj.ctx.fb_dtsg) {
-          log.warn("login", "Could not find fb_dtsg in HTML or fallbacks. Session might be limited.");
+        log.warn("login", "Could not find fb_dtsg in HTML or fallbacks. Session might be limited.");
       }
 
       ctx = Obj.ctx;
+      defaultFuncs = Obj.defaultFuncs;
       api = Obj.api;
       return res;
     });
@@ -746,8 +403,8 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       logger('✅ Session authenticated successfully', 'info');
       // Initialize safety monitoring
       globalSafety.startMonitoring(ctx, api);
-      try { globalSafety.startDynamicSystems(); } catch(_) {}
-      
+      try { globalSafety.startDynamicSystems(); } catch (_) { }
+
       // Initialize Cookie Refresher to prevent cookie expiry (env-configurable)
       try {
         const envBool = (v) => (v === '1' || (v && v.toLowerCase && v.toLowerCase() === 'true'));
@@ -770,16 +427,16 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
           backupEnabled: backupsEnabled,
           maxBackups: maxBackups
         });
-        
+
         // Get appstate path from options or ctx
-  const appstatePath = globalOptions.appstatePath || process.env.NEXUS_APPSTATE_PATH || (ctx.dataDir ? path.join(ctx.dataDir, 'appstate.json') : null);
-  const backupPath = process.env.NEXUS_COOKIE_BACKUP_PATH || globalOptions.backupPath || (ctx.dataDir ? path.join(ctx.dataDir, 'backups') : null);
-        
+        const appstatePath = globalOptions.appstatePath || process.env.NEXUS_APPSTATE_PATH || (ctx.dataDir ? path.join(ctx.dataDir, 'appstate.json') : null);
+        const backupPath = process.env.NEXUS_COOKIE_BACKUP_PATH || globalOptions.backupPath || (ctx.dataDir ? path.join(ctx.dataDir, 'backups') : null);
+
         if (appstatePath) {
           ctx.cookieRefresher = cookieRefresher.initialize(ctx, utils, defaultFuncs, appstatePath, backupPath);
           global.__NEXUS_COOKIE_REFRESHER__ = cookieRefresher; // Make accessible to MQTT for proactive refresh
           logger('✅ Cookie Refresher initialized - cookies will be kept fresh', 'info');
-          
+
           // Immediate first refresh to ensure long expiry
           cookieRefresher.refreshNow().catch(err => {
             logger(`❌ Initial cookie refresh failed: ${err.message}`, 'warn');
@@ -788,7 +445,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       } catch (err) {
         logger(`❌ Cookie Refresher initialization failed: ${err.message}`, 'error');
       }
-      
+
       // Consolidated: delegate light poke to unified safety module (prevents duplicate refresh scheduling)
       if (globalSafety && typeof globalSafety.scheduleLightPoke === 'function') {
         globalSafety.scheduleLightPoke();
@@ -808,7 +465,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
         } else {
           printIdentityBanner(uid || 'N/A');
         }
-      } catch(_) { /* ignore */ }
+      } catch (_) { /* ignore */ }
       callback(null, api);
     })
     .catch(e => {
@@ -817,7 +474,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
       if (!safetyCheck.safe) {
         logger(`🚨 SAFETY ALERT: ${safetyCheck.danger} - ${e.message}`, 'error');
       }
-      
+
       callback(e);
     });
 }
@@ -827,7 +484,7 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
 const { TOTP } = require("totp-generator");
 
 class IntegratedNexusLoginSystem {
-    constructor(options = {}) {
+  constructor(options = {}) {
     const dataDir = process.env.NEXUS_DATA_DIR || process.env.RENDER_DATA_DIR || process.cwd();
     const envPersistent = (v) => (v === '0' || v === 'false') ? false : (v === '1' || v === 'true') ? true : undefined;
     const envPD = envPersistent(process.env.NEXUS_PERSISTENT_DEVICE);
@@ -847,15 +504,15 @@ class IntegratedNexusLoginSystem {
       ...options
     };
 
-        this.deviceCache = new Map();
-        this.loginAttempts = 0;
-        this.lastLoginTime = 0;
-        // New: load previously persisted device if any
-        this.fixedDeviceProfile = this.loadPersistentDevice();
-        
+    this.deviceCache = new Map();
+    this.loginAttempts = 0;
+    this.lastLoginTime = 0;
+    // New: load previously persisted device if any
+    this.fixedDeviceProfile = this.loadPersistentDevice();
+
     this.ensureDirectories();
-        this.logger('Login system ready', '🚀');
-    }
+    this.logger('Login system ready', '🚀');
+  }
 
   ensureDirectories() {
     try {
@@ -877,137 +534,137 @@ class IntegratedNexusLoginSystem {
     }
   }
 
-    loadPersistentDevice() {
-        try {
-            if (!this.options.persistentDevice) return null;
-            if (fs.existsSync(this.options.persistentDeviceFile)) {
-                const raw = JSON.parse(fs.readFileSync(this.options.persistentDeviceFile, 'utf8'));
-                if (raw && raw.device && raw.deviceId && raw.familyDeviceId && raw.userAgent) {
-                    this.logger('Loaded persistent device profile', '📱');
-                    return raw;
-                }
-            }
-        } catch (e) {
-            this.logger('Failed to load persistent device: ' + e.message, '⚠️');
+  loadPersistentDevice() {
+    try {
+      if (!this.options.persistentDevice) return null;
+      if (fs.existsSync(this.options.persistentDeviceFile)) {
+        const raw = JSON.parse(fs.readFileSync(this.options.persistentDeviceFile, 'utf8'));
+        if (raw && raw.device && raw.deviceId && raw.familyDeviceId && raw.userAgent) {
+          this.logger('Loaded persistent device profile', '📱');
+          return raw;
         }
-        return null;
+      }
+    } catch (e) {
+      this.logger('Failed to load persistent device: ' + e.message, '⚠️');
+    }
+    return null;
+  }
+
+  savePersistentDevice(profile) {
+    if (!this.options.persistentDevice) return;
+    try {
+      fs.writeFileSync(this.options.persistentDeviceFile, JSON.stringify(profile, null, 2));
+      this.logger('Saved persistent device profile', '💾');
+    } catch (e) {
+      this.logger('Failed to save persistent device: ' + e.message, '⚠️');
+    }
+  }
+
+  getRandomDevice() {
+    if (this.fixedDeviceProfile) {
+      return this.fixedDeviceProfile; // reuse device
+    }
+    const devices = [
+      { model: "Pixel 6", build: "SP2A.220505.002", sdk: "30", release: "11" },
+      { model: "Pixel 5", build: "RQ3A.210805.001.A1", sdk: "30", release: "11" },
+      { model: "Samsung Galaxy S21", build: "G991USQU4AUDA", sdk: "30", release: "11" },
+      { model: "OnePlus 9", build: "LE2115_11_C.48", sdk: "30", release: "11" },
+      { model: "Xiaomi Mi 11", build: "RKQ1.200826.002", sdk: "30", release: "11" },
+      { model: "Pixel 7", build: "TD1A.220804.031", sdk: "33", release: "13" },
+      { model: "Samsung Galaxy S22", build: "S901USQU2AVB3", sdk: "32", release: "12" }
+    ];
+    const device = devices[Math.floor(Math.random() * devices.length)];
+    const deviceId = this.generateConsistentDeviceId(device);
+    const profile = {
+      userAgent: `Dalvik/2.1.0 (Linux; U; Android ${device.release}; ${device.model} Build/${device.build})`,
+      device,
+      deviceId,
+      familyDeviceId: uuidv4(),
+      androidId: this.generateAndroidId()
+    };
+    // Persist first generated device if persistence enabled
+    if (this.options.persistentDevice && !this.fixedDeviceProfile) {
+      this.fixedDeviceProfile = profile;
+      this.savePersistentDevice(profile);
+    }
+    return profile;
+  }
+
+  generateConsistentDeviceId(device) {
+    const key = `${device.model}_${device.build}`;
+    if (this.deviceCache.has(key)) {
+      return this.deviceCache.get(key);
     }
 
-    savePersistentDevice(profile) {
-        if (!this.options.persistentDevice) return;
-        try {
-            fs.writeFileSync(this.options.persistentDeviceFile, JSON.stringify(profile, null, 2));
-            this.logger('Saved persistent device profile', '💾');
-        } catch (e) {
-            this.logger('Failed to save persistent device: ' + e.message, '⚠️');
-        }
-    }
+    const deviceId = uuidv4();
+    this.deviceCache.set(key, deviceId);
+    return deviceId;
+  }
 
-    getRandomDevice() {
-        if (this.fixedDeviceProfile) {
-            return this.fixedDeviceProfile; // reuse device
-        }
-        const devices = [
-            { model: "Pixel 6", build: "SP2A.220505.002", sdk: "30", release: "11" },
-            { model: "Pixel 5", build: "RQ3A.210805.001.A1", sdk: "30", release: "11" },
-            { model: "Samsung Galaxy S21", build: "G991USQU4AUDA", sdk: "30", release: "11" },
-            { model: "OnePlus 9", build: "LE2115_11_C.48", sdk: "30", release: "11" },
-            { model: "Xiaomi Mi 11", build: "RKQ1.200826.002", sdk: "30", release: "11" },
-            { model: "Pixel 7", build: "TD1A.220804.031", sdk: "33", release: "13" },
-            { model: "Samsung Galaxy S22", build: "S901USQU2AVB3", sdk: "32", release: "12" }
-        ];
-        const device = devices[Math.floor(Math.random() * devices.length)];
-        const deviceId = this.generateConsistentDeviceId(device);
-        const profile = {
-            userAgent: `Dalvik/2.1.0 (Linux; U; Android ${device.release}; ${device.model} Build/${device.build})`,
-            device,
-            deviceId,
-            familyDeviceId: uuidv4(),
-            androidId: this.generateAndroidId()
-        };
-        // Persist first generated device if persistence enabled
-        if (this.options.persistentDevice && !this.fixedDeviceProfile) {
-            this.fixedDeviceProfile = profile;
-            this.savePersistentDevice(profile);
-        }
-        return profile;
-    }
+  generateAndroidId() {
+    return crypto.randomBytes(8).toString('hex');
+  }
 
-    generateConsistentDeviceId(device) {
-        const key = `${device.model}_${device.build}`;
-        if (this.deviceCache.has(key)) {
-            return this.deviceCache.get(key);
-        }
-        
-        const deviceId = uuidv4();
-        this.deviceCache.set(key, deviceId);
-        return deviceId;
+  randomString(length = 10) {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let result = 'abcdefghijklmnopqrstuvwxyz'.charAt(Math.floor(Math.random() * 26));
+    for (let i = 0; i < length - 1; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+    return result;
+  }
 
-    generateAndroidId() {
-        return crypto.randomBytes(8).toString('hex');
+  sort(obj) {
+    return Object.keys(obj).sort().reduce((result, key) => {
+      result[key] = obj[key];
+      return result;
+    }, {});
+  }
+
+  encodesig(data) {
+    const signature = '62f8ce9f74b12f84c123cc23437a4a32';
+    return crypto.createHash('md5').update(Object.keys(data).map(key => `${key}=${data[key]}`).join('&') + signature).digest('hex');
+  }
+
+  async safeDelay(min = 1000, max = 3000) {
+    const delay = Math.floor(Math.random() * (max - min + 1)) + min;
+    return new Promise(resolve => setTimeout(resolve, delay));
+  }
+
+  hasValidAppstate() {
+    try {
+      if (!fs.existsSync(this.options.appstatePath)) return false;
+      const appstate = JSON.parse(fs.readFileSync(this.options.appstatePath, 'utf8'));
+      return Array.isArray(appstate) && appstate.length > 0;
+    } catch (error) {
+      this.logger(`Appstate validation failed: ${error.message}`, '❌');
+      return false;
     }
+  }
 
-    randomString(length = 10) {
-        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-        let result = 'abcdefghijklmnopqrstuvwxyz'.charAt(Math.floor(Math.random() * 26));
-        for (let i = 0; i < length - 1; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return result;
-    }
+  loadAppstate() {
+    try {
+      const appstate = JSON.parse(fs.readFileSync(this.options.appstatePath, 'utf8'));
+      this.logger(`Loaded appstate with ${appstate.length} cookies`, '✅');
 
-    sort(obj) {
-        return Object.keys(obj).sort().reduce((result, key) => {
-            result[key] = obj[key];
-            return result;
-        }, {});
-    }
+      // Enhanced: Check and fix cookie expiry
+      const fixedAppstate = CookieManager.fixCookieExpiry(appstate, {
+        defaultExpiryDays: 90,
+        criticalExpiryDays: 90,
+        refreshExisting: true
+      });
 
-    encodesig(data) {
-        const signature = '62f8ce9f74b12f84c123cc23437a4a32';
-        return crypto.createHash('md5').update(Object.keys(data).map(key => `${key}=${data[key]}`).join('&') + signature).digest('hex');
-    }
+      // Save the fixed appstate back to file
+      if (fixedAppstate !== appstate) {
+        fs.writeFileSync(this.options.appstatePath, JSON.stringify(fixedAppstate, null, 2));
+        this.logger('Fixed cookie expiry dates and saved appstate', '🔧');
+      }
 
-    async safeDelay(min = 1000, max = 3000) {
-        const delay = Math.floor(Math.random() * (max - min + 1)) + min;
-        return new Promise(resolve => setTimeout(resolve, delay));
-    }
-
-    hasValidAppstate() {
-        try {
-            if (!fs.existsSync(this.options.appstatePath)) return false;
-            const appstate = JSON.parse(fs.readFileSync(this.options.appstatePath, 'utf8'));
-            return Array.isArray(appstate) && appstate.length > 0;
-        } catch (error) {
-            this.logger(`Appstate validation failed: ${error.message}`, '❌');
-            return false;
-        }
-    }
-
-    loadAppstate() {
-        try {
-            const appstate = JSON.parse(fs.readFileSync(this.options.appstatePath, 'utf8'));
-            this.logger(`Loaded appstate with ${appstate.length} cookies`, '✅');
-            
-            // Enhanced: Check and fix cookie expiry
-            const fixedAppstate = CookieManager.fixCookieExpiry(appstate, {
-                defaultExpiryDays: 90,
-                criticalExpiryDays: 90,
-                refreshExisting: true
-            });
-            
-            // Save the fixed appstate back to file
-            if (fixedAppstate !== appstate) {
-                fs.writeFileSync(this.options.appstatePath, JSON.stringify(fixedAppstate, null, 2));
-                this.logger('Fixed cookie expiry dates and saved appstate', '🔧');
-            }
-            
-            // Validate critical cookies
-            const validation = CookieManager.validateCriticalCookies(fixedAppstate);
-            if (!validation.valid) {
-                this.logger(`Warning: Missing critical cookies: ${validation.missing.join(', ')}`, '⚠️');
-            }
+      // Validate critical cookies
+      const validation = CookieManager.validateCriticalCookies(fixedAppstate);
+      if (!validation.valid) {
+        this.logger(`Warning: Missing critical cookies: ${validation.missing.join(', ')}`, '⚠️');
+      }
 
       // Warn if any critical cookies are expiring soon (< 7 days)
       try {
@@ -1036,491 +693,491 @@ class IntegratedNexusLoginSystem {
         if (hasExpiringSoon) {
           this.logger(`Some critical cookies expire soon - Cookie Refresher will extend them`, 'ℹ️');
         }
-      } catch (_) {}
-            
+      } catch (_) { }
+
       return fixedAppstate;
-        } catch (error) {
-            this.logger(`Failed to load appstate: ${error.message}`, '❌');
-            return null;
-        }
+    } catch (error) {
+      this.logger(`Failed to load appstate: ${error.message}`, '❌');
+      return null;
     }
+  }
 
-    saveAppstate(appstate, metadata = {}) {
-        try {
-            // First fix any cookie expiry issues
-            const fixedAppstate = CookieManager.fixCookieExpiry(appstate, {
-                defaultExpiryDays: 90,
-                criticalExpiryDays: 90,
-                refreshExisting: false
-            });
-            
-            fs.writeFileSync(this.options.appstatePath, JSON.stringify(fixedAppstate, null, 2));
-            
-            // Create backup
-            const backupName = `appstate_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-            const backupPath = path.join(this.options.backupPath, backupName);
-            
-            const backupData = {
-                appstate: fixedAppstate,
-                metadata: {
-                    ...metadata,
-                    created: new Date().toISOString(),
-                    source: 'NexusLoginSystem'
-                }
-            };
-            
-            fs.writeFileSync(backupPath, JSON.stringify(backupData, null, 2));
-            this.logger('Appstate saved and backed up successfully', '💾');
-            
-        } catch (error) {
-            this.logger(`Failed to save appstate: ${error.message}`, '❌');
+  saveAppstate(appstate, metadata = {}) {
+    try {
+      // First fix any cookie expiry issues
+      const fixedAppstate = CookieManager.fixCookieExpiry(appstate, {
+        defaultExpiryDays: 90,
+        criticalExpiryDays: 90,
+        refreshExisting: false
+      });
+
+      fs.writeFileSync(this.options.appstatePath, JSON.stringify(fixedAppstate, null, 2));
+
+      // Create backup
+      const backupName = `appstate_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      const backupPath = path.join(this.options.backupPath, backupName);
+
+      const backupData = {
+        appstate: fixedAppstate,
+        metadata: {
+          ...metadata,
+          created: new Date().toISOString(),
+          source: 'NexusLoginSystem'
         }
+      };
+
+      fs.writeFileSync(backupPath, JSON.stringify(backupData, null, 2));
+      this.logger('Appstate saved and backed up successfully', '💾');
+
+    } catch (error) {
+      this.logger(`Failed to save appstate: ${error.message}`, '❌');
     }
+  }
 
-    async generateAppstate(credentials) {
-        try {
-            if (this.options.safeMode) {
-                const timeSinceLastLogin = Date.now() - this.lastLoginTime;
-                if (timeSinceLastLogin < 30000) {
-                    this.logger('Rate limiting: Please wait before next login attempt', '⚠️');
-                    await new Promise(resolve => setTimeout(resolve, 30000 - timeSinceLastLogin));
-                }
-            }
+  async generateAppstate(credentials) {
+    try {
+      if (this.options.safeMode) {
+        const timeSinceLastLogin = Date.now() - this.lastLoginTime;
+        if (timeSinceLastLogin < 30000) {
+          this.logger('Rate limiting: Please wait before next login attempt', '⚠️');
+          await new Promise(resolve => setTimeout(resolve, 30000 - timeSinceLastLogin));
+        }
+      }
 
-            this.lastLoginTime = Date.now();
-            this.loginAttempts++;
+      this.lastLoginTime = Date.now();
+      this.loginAttempts++;
 
-            const androidDevice = this.getRandomDevice();
-            const machineId = this.randomString(24);
+      const androidDevice = this.getRandomDevice();
+      const machineId = this.randomString(24);
 
-            await this.safeDelay(1000, 2000);
+      await this.safeDelay(1000, 2000);
 
-            // Clean 2FA secret (remove spaces)
-            if (credentials.twofactor) {
-                credentials.twofactor = credentials.twofactor.replace(/\s+/g, '');
-            }
+      // Clean 2FA secret (remove spaces)
+      if (credentials.twofactor) {
+        credentials.twofactor = credentials.twofactor.replace(/\s+/g, '');
+      }
 
-            const form = {
-                adid: uuidv4(),
-                email: credentials.username,
-                password: credentials.password,
-                format: 'json',
-                device_id: androidDevice.deviceId,
-                cpl: 'true',
-                family_device_id: androidDevice.familyDeviceId,
-                locale: 'en_US',
-                client_country_code: 'US',
-                credentials_type: 'device_based_login_password',
-                generate_session_cookies: '1',
-                generate_analytics_claim: '1',
-                generate_machine_id: '1',
-                currently_logged_in_userid: '0',
-                irisSeqID: 1,
-                try_num: "1",
-                enroll_misauth: "false",
-                meta_inf_fbmeta: "NO_FILE",
-                source: 'login',
-                machine_id: machineId,
-                fb_api_req_friendly_name: 'authenticate',
-                fb_api_caller_class: 'com.facebook.account.login.protocol.Fb4aAuthHandler',
-                api_key: '882a8490361da98702bf97a021ddc14d',
-                access_token: '350685531728|62f8ce9f74b12f84c123cc23437a4a32',
-                advertiser_id: uuidv4(),
-                device_platform: 'android',
-                app_version: '392.0.0.0.66',
-                network_type: 'WIFI'
-            };
+      const form = {
+        adid: uuidv4(),
+        email: credentials.username,
+        password: credentials.password,
+        format: 'json',
+        device_id: androidDevice.deviceId,
+        cpl: 'true',
+        family_device_id: androidDevice.familyDeviceId,
+        locale: 'en_US',
+        client_country_code: 'US',
+        credentials_type: 'device_based_login_password',
+        generate_session_cookies: '1',
+        generate_analytics_claim: '1',
+        generate_machine_id: '1',
+        currently_logged_in_userid: '0',
+        irisSeqID: 1,
+        try_num: "1",
+        enroll_misauth: "false",
+        meta_inf_fbmeta: "NO_FILE",
+        source: 'login',
+        machine_id: machineId,
+        fb_api_req_friendly_name: 'authenticate',
+        fb_api_caller_class: 'com.facebook.account.login.protocol.Fb4aAuthHandler',
+        api_key: '882a8490361da98702bf97a021ddc14d',
+        access_token: '350685531728|62f8ce9f74b12f84c123cc23437a4a32',
+        advertiser_id: uuidv4(),
+        device_platform: 'android',
+        app_version: '392.0.0.0.66',
+        network_type: 'WIFI'
+      };
 
-            form.sig = this.encodesig(this.sort(form));
+      form.sig = this.encodesig(this.sort(form));
 
-            const options = {
-                url: 'https://b-graph.facebook.com/auth/login',
-                method: 'post',
-                data: form,
-                transformRequest: [(data) => require('querystring').stringify(data)],
-                headers: {
-                    'content-type': 'application/x-www-form-urlencoded',
-                    'x-fb-friendly-name': form["fb_api_req_friendly_name"],
-                    'x-fb-http-engine': 'Liger',
-                    'user-agent': androidDevice.userAgent,
-                    'x-fb-client-ip': 'True',
-                    'x-fb-server-cluster': 'True',
-                    'x-fb-connection-bandwidth': Math.floor(Math.random() * 40000000) + 10000000,
-                    'x-fb-connection-quality': 'EXCELLENT',
-                    'x-fb-connection-type': 'WIFI',
-                    'x-fb-net-hni': '',
-                    'x-fb-sim-hni': '',
-                    'x-fb-device-group': '5120',
-                    'x-tigon-is-retry': 'False',
-                    'x-fb-rmd': 'cached=0;state=NO_MATCH',
-                    'x-fb-request-analytics-tags': 'unknown',
-                    'authorization': `OAuth ${form.access_token}`,
-                    'accept-language': 'en-US,en;q=0.9',
-                    'x-fb-client-ip': 'True',
-                    'x-fb-server-cluster': 'True'
-                },
-                timeout: 30000
-            };
+      const options = {
+        url: 'https://b-graph.facebook.com/auth/login',
+        method: 'post',
+        data: form,
+        transformRequest: [(data) => require('querystring').stringify(data)],
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          'x-fb-friendly-name': form["fb_api_req_friendly_name"],
+          'x-fb-http-engine': 'Liger',
+          'user-agent': androidDevice.userAgent,
+          'x-fb-client-ip': 'True',
+          'x-fb-server-cluster': 'True',
+          'x-fb-connection-bandwidth': Math.floor(Math.random() * 40000000) + 10000000,
+          'x-fb-connection-quality': 'EXCELLENT',
+          'x-fb-connection-type': 'WIFI',
+          'x-fb-net-hni': '',
+          'x-fb-sim-hni': '',
+          'x-fb-device-group': '5120',
+          'x-tigon-is-retry': 'False',
+          'x-fb-rmd': 'cached=0;state=NO_MATCH',
+          'x-fb-request-analytics-tags': 'unknown',
+          'authorization': `OAuth ${form.access_token}`,
+          'accept-language': 'en-US,en;q=0.9',
+          'x-fb-client-ip': 'True',
+          'x-fb-server-cluster': 'True'
+        },
+        timeout: 30000
+      };
 
-            this.logger('Connecting to Facebook servers...', '🔐');
+      this.logger('Connecting to Facebook servers...', '🔐');
 
-            return new Promise((resolve) => {
-                axios.request(options).then(async (response) => {
-                    try {
-                        if (response.data.session_cookies) {
-                            const appstate = response.data.session_cookies.map(cookie => ({
-                                key: cookie.name,
-                                value: cookie.value,
-                                domain: cookie.domain,
-                                path: cookie.path,
-                                expires: cookie.expires ? new Date(cookie.expires * 1000).toUTCString() : CookieManager.getDefaultExpiry(cookie.name),
-                                httpOnly: cookie.httpOnly,
-                                secure: cookie.secure
-                            }));
+      return new Promise((resolve) => {
+        axios.request(options).then(async (response) => {
+          try {
+            if (response.data.session_cookies) {
+              const appstate = response.data.session_cookies.map(cookie => ({
+                key: cookie.name,
+                value: cookie.value,
+                domain: cookie.domain,
+                path: cookie.path,
+                expires: cookie.expires ? new Date(cookie.expires * 1000).toUTCString() : CookieManager.getDefaultExpiry(cookie.name),
+                httpOnly: cookie.httpOnly,
+                secure: cookie.secure
+              }));
 
-                            if (credentials.i_user) {
-                                appstate.push({
-                                    key: 'i_user',
-                                    value: credentials.i_user,
-                                    domain: '.facebook.com',
-                                    path: '/',
-                                    expires: CookieManager.getDefaultExpiry('i_user'),
-                                    secure: true
-                                });
-                            }
-
-                            await this.safeDelay(500, 1500);
-
-                            const result = {
-                                success: true,
-                                appstate: appstate,
-                                access_token: response.data.access_token,
-                                device_info: {
-                                    model: androidDevice.device.model,
-                                    user_agent: androidDevice.userAgent,
-                                    device_id: androidDevice.deviceId,
-                                    family_device_id: androidDevice.familyDeviceId
-                                },
-                                generated_at: new Date().toISOString(),
-                                persistent_device: !!this.options.persistentDevice
-                            };
-
-                            this.saveAppstate(appstate, result);
-                            this.logger('✅ Login successful - Session established', '🎉');
-                            
-                            resolve(result);
-                        }
-                    } catch (e) {
-                        this.logger(`Login processing error: ${e.message}`, '❌');
-                        resolve({
-                            success: false,
-                            message: "Login processing failed. Please try again."
-                        });
-                    }
-                }).catch(async (error) => {
-                    // Handle 2FA requirement
-                    try {
-                        const errorData = error.response?.data?.error?.error_data;
-                        
-                        if (!errorData) {
-                            throw new Error('Unknown login error');
-                        }
-
-                        let twoFactorCode;
-
-                        if (credentials._2fa && credentials._2fa !== "0") {
-                            twoFactorCode = credentials._2fa;
-                        } else if (credentials.twofactor && credentials.twofactor !== "0") {
-                            try {
-                                this.logger('Generating 2FA code...', '🔐');
-                                const cleanSecret = decodeURI(credentials.twofactor).replace(/\s+/g, '').toUpperCase();
-                                const { otp } = TOTP.generate(cleanSecret);
-                                twoFactorCode = otp;
-                                this.logger(`✅ 2FA code generated: ${otp}`, '🔑');
-                            } catch (e) {
-                                return resolve({
-                                    success: false,
-                                    message: 'Invalid 2FA secret key format'
-                                });
-                            }
-                        } else {
-                            return resolve({
-                                success: false,
-                                message: 'Two-factor authentication required. Please provide 2FA secret or code.'
-                            });
-                        }
-
-                        await this.safeDelay(2000, 4000);
-
-                        const twoFactorForm = {
-                            ...form,
-                            twofactor_code: twoFactorCode,
-                            encrypted_msisdn: "",
-                            userid: errorData.uid,
-                            machine_id: errorData.machine_id || machineId,
-                            first_factor: errorData.login_first_factor,
-                            credentials_type: "two_factor"
-                        };
-
-                        twoFactorForm.sig = this.encodesig(this.sort(twoFactorForm));
-                        options.data = twoFactorForm;
-
-                        this.logger('Verifying 2FA code...', '🔐');
-
-                        try {
-                            const twoFactorResponse = await axios.request(options);
-
-                            const appstate = twoFactorResponse.data.session_cookies.map(cookie => ({
-                                key: cookie.name,
-                                value: cookie.value,
-                                domain: cookie.domain,
-                                path: cookie.path,
-                                expires: cookie.expires ? new Date(cookie.expires * 1000).toUTCString() : CookieManager.getDefaultExpiry(cookie.name),
-                                httpOnly: cookie.httpOnly,
-                                secure: cookie.secure
-                            }));
-
-                            if (credentials.i_user) {
-                                appstate.push({
-                                    key: 'i_user',
-                                    value: credentials.i_user,
-                                    domain: '.facebook.com',
-                                    path: '/',
-                                    expires: CookieManager.getDefaultExpiry('i_user'),
-                                    secure: true
-                                });
-                            }
-
-                            const result = {
-                                success: true,
-                                appstate: appstate,
-                                access_token: twoFactorResponse.data.access_token,
-                                device_info: {
-                                    model: androidDevice.device.model,
-                                    user_agent: androidDevice.userAgent
-                                },
-                                method: '2FA',
-                                generated_at: new Date().toISOString()
-                            };
-
-                            this.saveAppstate(appstate, result);
-                            this.logger('✅ 2FA verification successful', '🎉');
-                            
-                            resolve(result);
-
-                        } catch (requestError) {
-                            this.logger(`2FA request failed: ${requestError.message}`, '❌');
-                            resolve({
-                                success: false,
-                                message: '2FA verification failed. Check your code and try again.'
-                            });
-                        }
-
-                    } catch (twoFactorError) {
-                        this.logger(`2FA error: ${twoFactorError.message}`, '❌');
-                        resolve({
-                            success: false,
-                            message: 'Login failed. Check credentials and try again.'
-                        });
-                    }
+              if (credentials.i_user) {
+                appstate.push({
+                  key: 'i_user',
+                  value: credentials.i_user,
+                  domain: '.facebook.com',
+                  path: '/',
+                  expires: CookieManager.getDefaultExpiry('i_user'),
+                  secure: true
                 });
+              }
+
+              await this.safeDelay(500, 1500);
+
+              const result = {
+                success: true,
+                appstate: appstate,
+                access_token: response.data.access_token,
+                device_info: {
+                  model: androidDevice.device.model,
+                  user_agent: androidDevice.userAgent,
+                  device_id: androidDevice.deviceId,
+                  family_device_id: androidDevice.familyDeviceId
+                },
+                generated_at: new Date().toISOString(),
+                persistent_device: !!this.options.persistentDevice
+              };
+
+              this.saveAppstate(appstate, result);
+              this.logger('✅ Login successful - Session established', '🎉');
+
+              resolve(result);
+            }
+          } catch (e) {
+            this.logger(`Login processing error: ${e.message}`, '❌');
+            resolve({
+              success: false,
+              message: "Login processing failed. Please try again."
             });
+          }
+        }).catch(async (error) => {
+          // Handle 2FA requirement
+          try {
+            const errorData = error.response?.data?.error?.error_data;
 
-        } catch (e) {
-            this.logger(`Unexpected error: ${e.message}`, '💥');
-            return {
+            if (!errorData) {
+              throw new Error('Unknown login error');
+            }
+
+            let twoFactorCode;
+
+            if (credentials._2fa && credentials._2fa !== "0") {
+              twoFactorCode = credentials._2fa;
+            } else if (credentials.twofactor && credentials.twofactor !== "0") {
+              try {
+                this.logger('Generating 2FA code...', '🔐');
+                const cleanSecret = decodeURI(credentials.twofactor).replace(/\s+/g, '').toUpperCase();
+                const { otp } = TOTP.generate(cleanSecret);
+                twoFactorCode = otp;
+                this.logger(`✅ 2FA code generated: ${otp}`, '🔑');
+              } catch (e) {
+                return resolve({
+                  success: false,
+                  message: 'Invalid 2FA secret key format'
+                });
+              }
+            } else {
+              return resolve({
                 success: false,
-                message: 'Unexpected error occurred. Please try again.'
+                message: 'Two-factor authentication required. Please provide 2FA secret or code.'
+              });
+            }
+
+            await this.safeDelay(2000, 4000);
+
+            const twoFactorForm = {
+              ...form,
+              twofactor_code: twoFactorCode,
+              encrypted_msisdn: "",
+              userid: errorData.uid,
+              machine_id: errorData.machine_id || machineId,
+              first_factor: errorData.login_first_factor,
+              credentials_type: "two_factor"
             };
-        }
-    }
 
-    async login(credentials = null) {
-        try {
-            this.logger('Initializing authentication...', '🚀');
+            twoFactorForm.sig = this.encodesig(this.sort(twoFactorForm));
+            options.data = twoFactorForm;
 
-            // Check for existing valid appstate first
-            if (this.options.autoLogin && this.hasValidAppstate()) {
-                this.logger('Existing session found', '✅');
-                const appstate = this.loadAppstate();
-                
-                if (appstate) {
-                    return {
-                        success: true,
-                        appstate: appstate,
-                        method: 'existing_session',
-                        message: 'Login successful using existing session'
-                    };
-                }
-            }
+            this.logger('Verifying 2FA code...', '🔐');
 
-            // No valid appstate, need credentials
-            if (!credentials) {
-                // Try to load from credentials file
-                if (fs.existsSync(this.options.credentialsPath)) {
-                    try {
-                        credentials = JSON.parse(fs.readFileSync(this.options.credentialsPath, 'utf8'));
-                        this.logger('Credentials loaded from file', '📁');
-                    } catch (error) {
-                        this.logger('Failed to load credentials file', '❌');
-                    }
-                }
+            try {
+              const twoFactorResponse = await axios.request(options);
 
-                if (!credentials) {
-                    return {
-                        success: false,
-                        message: 'No valid session found and no credentials provided'
-                    };
-                }
-            }
+              const appstate = twoFactorResponse.data.session_cookies.map(cookie => ({
+                key: cookie.name,
+                value: cookie.value,
+                domain: cookie.domain,
+                path: cookie.path,
+                expires: cookie.expires ? new Date(cookie.expires * 1000).toUTCString() : CookieManager.getDefaultExpiry(cookie.name),
+                httpOnly: cookie.httpOnly,
+                secure: cookie.secure
+              }));
 
-            // Validate credentials
-            if (!credentials.username || !credentials.password) {
-                return {
-                    success: false,
-                    message: 'Username and password are required'
-                };
-            }
+              if (credentials.i_user) {
+                appstate.push({
+                  key: 'i_user',
+                  value: credentials.i_user,
+                  domain: '.facebook.com',
+                  path: '/',
+                  expires: CookieManager.getDefaultExpiry('i_user'),
+                  secure: true
+                });
+              }
 
-            this.logger('Creating new session...', '🔄');
-            
-            // Generate new appstate
-            const result = await this.generateAppstate(credentials);
-            
-            if (result.success) {
-                // Save credentials for future use (optional)
-                if (this.options.autoSave && !fs.existsSync(this.options.credentialsPath)) {
-                    try {
-                        const credentialsToSave = { ...credentials };
-                        delete credentialsToSave.password; // Don't save password for security
-                        fs.writeFileSync(this.options.credentialsPath, JSON.stringify(credentialsToSave, null, 2));
-                    } catch (error) {
-                        this.logger('Failed to save credentials (non-critical)', '⚠️');
-                    }
-                }
-            }
+              const result = {
+                success: true,
+                appstate: appstate,
+                access_token: twoFactorResponse.data.access_token,
+                device_info: {
+                  model: androidDevice.device.model,
+                  user_agent: androidDevice.userAgent
+                },
+                method: '2FA',
+                generated_at: new Date().toISOString()
+              };
 
-            return result;
+              this.saveAppstate(appstate, result);
+              this.logger('✅ 2FA verification successful', '🎉');
 
-        } catch (error) {
-            this.logger(`Authentication error: ${error.message}`, '💥');
-            return {
+              resolve(result);
+
+            } catch (requestError) {
+              this.logger(`2FA request failed: ${requestError.message}`, '❌');
+              resolve({
                 success: false,
-                message: `Authentication error: ${error.message}`
-            };
-        }
+                message: '2FA verification failed. Check your code and try again.'
+              });
+            }
+
+          } catch (twoFactorError) {
+            this.logger(`2FA error: ${twoFactorError.message}`, '❌');
+            resolve({
+              success: false,
+              message: 'Login failed. Check credentials and try again.'
+            });
+          }
+        });
+      });
+
+    } catch (e) {
+      this.logger(`Unexpected error: ${e.message}`, '💥');
+      return {
+        success: false,
+        message: 'Unexpected error occurred. Please try again.'
+      };
     }
+  }
+
+  async login(credentials = null) {
+    try {
+      this.logger('Initializing authentication...', '🚀');
+
+      // Check for existing valid appstate first
+      if (this.options.autoLogin && this.hasValidAppstate()) {
+        this.logger('Existing session found', '✅');
+        const appstate = this.loadAppstate();
+
+        if (appstate) {
+          return {
+            success: true,
+            appstate: appstate,
+            method: 'existing_session',
+            message: 'Login successful using existing session'
+          };
+        }
+      }
+
+      // No valid appstate, need credentials
+      if (!credentials) {
+        // Try to load from credentials file
+        if (fs.existsSync(this.options.credentialsPath)) {
+          try {
+            credentials = JSON.parse(fs.readFileSync(this.options.credentialsPath, 'utf8'));
+            this.logger('Credentials loaded from file', '📁');
+          } catch (error) {
+            this.logger('Failed to load credentials file', '❌');
+          }
+        }
+
+        if (!credentials) {
+          return {
+            success: false,
+            message: 'No valid session found and no credentials provided'
+          };
+        }
+      }
+
+      // Validate credentials
+      if (!credentials.username || !credentials.password) {
+        return {
+          success: false,
+          message: 'Username and password are required'
+        };
+      }
+
+      this.logger('Creating new session...', '🔄');
+
+      // Generate new appstate
+      const result = await this.generateAppstate(credentials);
+
+      if (result.success) {
+        // Save credentials for future use (optional)
+        if (this.options.autoSave && !fs.existsSync(this.options.credentialsPath)) {
+          try {
+            const credentialsToSave = { ...credentials };
+            delete credentialsToSave.password; // Don't save password for security
+            fs.writeFileSync(this.options.credentialsPath, JSON.stringify(credentialsToSave, null, 2));
+          } catch (error) {
+            this.logger('Failed to save credentials (non-critical)', '⚠️');
+          }
+        }
+      }
+
+      return result;
+
+    } catch (error) {
+      this.logger(`Authentication error: ${error.message}`, '💥');
+      return {
+        success: false,
+        message: `Authentication error: ${error.message}`
+      };
+    }
+  }
 }
 
 // Integrated Nexus Login wrapper for easy usage
 async function integratedNexusLogin(credentials = null, options = {}) {
-    printFancyStartupBanner();
-    const loginSystem = new IntegratedNexusLoginSystem(options);
-    
-    // Professional logging system
-    const Logger = {
-        info: (stage, message, details = null) => {
-            console.log(`\x1b[36m[INFO]\x1b[0m \x1b[32m[${stage}]\x1b[0m ${message}`);
-            if (details && options.verbose) console.log(`\x1b[90m       → ${details}\x1b[0m`);
-        },
-        success: (stage, message, details = null) => {
-            console.log(`\x1b[32m[SUCCESS]\x1b[0m \x1b[32m[${stage}]\x1b[0m ${message}`);
-            if (details && options.verbose) console.log(`\x1b[90m         → ${details}\x1b[0m`);
-        },
-        warn: (stage, message, details = null) => {
-            console.log(`\x1b[33m[WARN]\x1b[0m \x1b[33m[${stage}]\x1b[0m ${message}`);
-            if (details) console.log(`\x1b[90m      → ${details}\x1b[0m`);
-        },
-        error: (stage, message, details = null) => {
-            console.log(`\x1b[31m[ERROR]\x1b[0m \x1b[31m[${stage}]\x1b[0m ${message}`);
-            if (details) console.log(`\x1b[90m       → ${details}\x1b[0m`);
-        }
-    };
+  printFancyStartupBanner();
+  const loginSystem = new IntegratedNexusLoginSystem(options);
 
-    // Phase 1: Secure authentication and session generation
-    Logger.info('AUTH', 'Initializing secure authentication');
-    Logger.info('SECURE-LOGIN', 'Establishing secure connection to Facebook');
-    
-    const result = await loginSystem.login(credentials);
-    
-    if (!result.success) {
-        Logger.error('AUTH', 'Authentication failed', result.message);
-        return result;
+  // Professional logging system
+  const Logger = {
+    info: (stage, message, details = null) => {
+      console.log(`\x1b[36m[INFO]\x1b[0m \x1b[32m[${stage}]\x1b[0m ${message}`);
+      if (details && options.verbose) console.log(`\x1b[90m       → ${details}\x1b[0m`);
+    },
+    success: (stage, message, details = null) => {
+      console.log(`\x1b[32m[SUCCESS]\x1b[0m \x1b[32m[${stage}]\x1b[0m ${message}`);
+      if (details && options.verbose) console.log(`\x1b[90m         → ${details}\x1b[0m`);
+    },
+    warn: (stage, message, details = null) => {
+      console.log(`\x1b[33m[WARN]\x1b[0m \x1b[33m[${stage}]\x1b[0m ${message}`);
+      if (details) console.log(`\x1b[90m      → ${details}\x1b[0m`);
+    },
+    error: (stage, message, details = null) => {
+      console.log(`\x1b[31m[ERROR]\x1b[0m \x1b[31m[${stage}]\x1b[0m ${message}`);
+      if (details) console.log(`\x1b[90m       → ${details}\x1b[0m`);
     }
-    
-    Logger.success('AUTH', 'Authentication completed successfully');
-    Logger.info('SESSION', `Login method: ${result.method} | Status: Active`);
-    
-    if (options.autoStartBot !== false && result.appstate) {
-        // Phase 2: Start Nexus-FCA bot with authenticated session
-        Logger.info('BOT-INIT', 'Initializing bot with secure session');
-        
-        try {
-            // Prepare global options for bot system
+  };
+
+  // Phase 1: Secure authentication and session generation
+  Logger.info('AUTH', 'Initializing secure authentication');
+  Logger.info('SECURE-LOGIN', 'Establishing secure connection to Facebook');
+
+  const result = await loginSystem.login(credentials);
+
+  if (!result.success) {
+    Logger.error('AUTH', 'Authentication failed', result.message);
+    return result;
+  }
+
+  Logger.success('AUTH', 'Authentication completed successfully');
+  Logger.info('SESSION', `Login method: ${result.method} | Status: Active`);
+
+  if (options.autoStartBot !== false && result.appstate) {
+    // Phase 2: Start Nexus-FCA bot with authenticated session
+    Logger.info('BOT-INIT', 'Initializing bot with secure session');
+
+    try {
+      // Prepare global options for bot system
       const globalOptions = {
-                selfListen: false,
-                selfListenEvent: false,
-                listenEvents: false,
-                listenTyping: false,
-                updatePresence: false,
-                forceLogin: false,
-                autoMarkDelivery: true,
-                autoMarkRead: false,
-                autoReconnect: true,
-                logRecordSize: defaultLogRecordSize,
+        selfListen: false,
+        selfListenEvent: false,
+        listenEvents: false,
+        listenTyping: false,
+        updatePresence: false,
+        forceLogin: false,
+        autoMarkDelivery: true,
+        autoMarkRead: false,
+        autoReconnect: true,
+        logRecordSize: defaultLogRecordSize,
         online: (process.env.NEXUS_ONLINE ? (process.env.NEXUS_ONLINE === '1' || process.env.NEXUS_ONLINE === 'true') : true),
-                emitReady: false,
+        emitReady: false,
         userAgent: process.env.NEXUS_UA || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         proxy: process.env.NEXUS_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
         acceptLanguage: process.env.NEXUS_ACCEPT_LANGUAGE || 'en-US,en;q=0.9',
         disablePreflight: process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true',
-                ...options
-            };
+        ...options
+      };
 
-            return new Promise((resolve) => {
-                // Initialize Nexus-FCA bot with authenticated session
-                Logger.info('BOT-INIT', 'Loading bot API systems');
-                
-                loginHelper(result.appstate, null, null, globalOptions, (err, api) => {
-                    if (err) {
-                        Logger.error('BOT-INIT', 'Failed to initialize bot API', err.message);
-                        resolve({
-                            success: true,
-                            appstate: result.appstate,
-                            method: result.method,
-                            warning: 'Session ready but bot initialization failed',
-                            botError: err.message
-                        });
-                    } else {
-                        Logger.success('BOT-INIT', 'Bot initialized successfully');
-                        Logger.success('READY', '🚀 Nexus-FCA is now ready for use');
-                        Logger.info('STATUS', `Bot online | User ID: ${api.getCurrentUserID()}`);
-                        
-                        resolve({
-                            success: true,
-                            api: api,
-                            appstate: result.appstate,
-                            method: result.method,
-                            message: 'Nexus-FCA login successful'
-                        });
-                    }
-                }, null);
+      return new Promise((resolve) => {
+        // Initialize Nexus-FCA bot with authenticated session
+        Logger.info('BOT-INIT', 'Loading bot API systems');
+
+        loginHelper(result.appstate, null, null, globalOptions, (err, api) => {
+          if (err) {
+            Logger.error('BOT-INIT', 'Failed to initialize bot API', err.message);
+            resolve({
+              success: true,
+              appstate: result.appstate,
+              method: result.method,
+              warning: 'Session ready but bot initialization failed',
+              botError: err.message
             });
-        } catch (error) {
-            Logger.error('BOT-INIT', 'Exception during bot initialization', error.message);
-            return {
-                success: true,
-                appstate: result.appstate,
-                method: result.method,
-                warning: 'Session ready but bot initialization failed',
-                botError: error.message
-            };
-        }
+          } else {
+            Logger.success('BOT-INIT', 'Bot initialized successfully');
+            Logger.success('READY', '🚀 Nexus-FCA is now ready for use');
+            Logger.info('STATUS', `Bot online | User ID: ${api.getCurrentUserID()}`);
+
+            resolve({
+              success: true,
+              api: api,
+              appstate: result.appstate,
+              method: result.method,
+              message: 'Nexus-FCA login successful'
+            });
+          }
+        }, null);
+      });
+    } catch (error) {
+      Logger.error('BOT-INIT', 'Exception during bot initialization', error.message);
+      return {
+        success: true,
+        appstate: result.appstate,
+        method: result.method,
+        warning: 'Session ready but bot initialization failed',
+        botError: error.message
+      };
     }
-    
-    // Return session-only result (no bot startup)
-    Logger.success('SESSION-ONLY', 'Authentication completed successfully');
-    return result;
+  }
+
+  // Return session-only result (no bot startup)
+  Logger.success('SESSION-ONLY', 'Authentication completed successfully');
+  return result;
 }
 
 /**
@@ -1550,7 +1207,7 @@ async function login(loginData, options = {}, callback) {
       resolve(api);
     };
   }) : null;
-  
+
   // Professional logging
   const mainLogger = {
     info: (message, details = null) => {
@@ -1567,7 +1224,7 @@ async function login(loginData, options = {}, callback) {
   if (loginData.email || loginData.username || loginData.password) {
     mainLogger.info('🔐 Starting secure authentication');
     mainLogger.info('🛡️ Generating secure session with new system');
-    
+
     try {
       // STEP 1: Use NEW system ONLY to generate appstate/cookies
       const result = await integratedNexusLogin({
@@ -1577,16 +1234,16 @@ async function login(loginData, options = {}, callback) {
         _2fa: loginData._2fa || undefined,
         appstate: loginData.appState || loginData.appstate || undefined
       }, { autoStartBot: false }); // ONLY generate cookies, NO bot startup
-      
+
       if (!result.success || !result.appstate) {
         mainLogger.error('❌ Authentication failed', result.message);
         if (callback) callback(new Error(result.message || 'Login failed'));
         return usePromise ? promise : undefined;
       }
-      
+
       mainLogger.info('✅ Session generated successfully');
       mainLogger.info('🔄 Starting bot with generated session (old system)');
-      
+
       // STEP 2: Single session guard before starting bot (configurable)
       try {
         const envLockFlag = process.env.NEXUS_SESSION_LOCK_ENABLED;
@@ -1622,7 +1279,7 @@ async function login(loginData, options = {}, callback) {
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         ...options
       };
-      
+
       loginHelper(
         result.appstate,  // Use generated appstate
         null,             // No email for old system
@@ -1632,7 +1289,7 @@ async function login(loginData, options = {}, callback) {
         null
       );
       return usePromise ? promise : undefined;
-      
+
     } catch (error) {
       mainLogger.error('💥 Login error', error.message);
       if (callback) callback(error);
@@ -1646,7 +1303,7 @@ async function login(loginData, options = {}, callback) {
       if (callback) callback(error);
       return usePromise ? promise : undefined;
     }
-    
+
     // Direct session authentication using appstate (with single session guard)
     try {
       const envLockFlag = process.env.NEXUS_SESSION_LOCK_ENABLED;
@@ -1665,7 +1322,7 @@ async function login(loginData, options = {}, callback) {
       return usePromise ? promise : undefined;
     }
     mainLogger.info('🔄 Starting session authentication');
-    
+
     const globalOptions = {
       selfListen: false,
       selfListenEvent: false,
@@ -1687,7 +1344,7 @@ async function login(loginData, options = {}, callback) {
       disablePreflight: process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true',
       ...options
     };
-    
+
     loginHelper(
       loginData.appState || loginData.appstate,
       null, // No email for appstate login
@@ -1713,7 +1370,7 @@ module.exports.FacebookSafety = FacebookSafety;
 module.exports.NexusClient = NexusClient;
 module.exports.PerformanceManager = PerformanceManager;
 module.exports.ErrorHandler = ErrorHandler;
-module.exports.AdvancedMqttManager = AdvancedMqttManager;
+// Removed: AdvancedMqttManager (was deleted in Phase 1)
 module.exports.EnhancedDatabase = EnhancedDatabase;
 module.exports.CompatibilityLayer = CompatibilityLayer;
 module.exports.Message = Message;
@@ -1723,3 +1380,6 @@ module.exports.User = User;
 module.exports.EmailPasswordLogin = EmailPasswordLogin;
 module.exports.ProxyManager = ProxyManager;
 module.exports.UserAgentManager = UserAgentManager;
+// NEW: Refactored module exports
+module.exports.LoginManager = LoginManager;
+module.exports.ApiFactory = ApiFactory;

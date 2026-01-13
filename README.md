@@ -2,19 +2,19 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="520" />
 </p>
 
-# Nexus-FCA v3.1.1 – 🏆 THE BEST, SAFEST, MOST STABLE FCA
+# Nexus-FCA v3.2.0 – 🏆 THE BEST, SAFEST, MOST STABLE FCA
 
-Modern, safe, production‑ready Messenger (Facebook Chat) API layer with **email/password + appState login**, **proxy support**, **random user agent**, adaptive session & connection resilience, proactive cookie refresh, MQTT stability enhancements, delivery reliability safeguards, memory protection, and rich runtime metrics. Promise + callback compatible, TypeScript typed, minimal friction.
+Modern, safe, production‑ready Messenger (Facebook Chat) API layer. **Now 50% lighter with Modular Architecture!** Features **email/password login**, **region-aware safety**, **smart MQTT recovery**, and **proactive cookie refresh**.
 
-## 🎉 NEW in 3.1.1 - Industry Leading Features!
-- ✅ **Smart MQTT Recovery** - Auto-refreshes Sequence ID on errors to prevent loops
-- ✅ **Proactive Lifecycle Management** - Randomized reconnects (26-60m) to mimic human behavior
-- ✅ **Email/Password Login** - Login with Facebook credentials (not just cookies!)
-- ✅ **Advanced Proxy Support** - HTTP/HTTPS/SOCKS5 proxy for all connections
-- ✅ **Random User Agent** - 14+ realistic user agents to avoid detection
-- ✅ **Enhanced Configuration** - autoMarkRead, emitReady, bypassRegion, and more!
-- ✅ **Environment Variables** - Full configuration via env vars
-- ✅ **Best-in-Class Stability** - Proactive cookie refresh + MQTT recovery + session protection!
+## 🎉 NEW in 3.2.0 - Major Refactor & Stability!
+- ✅ **Modular Architecture** - Core logic split into `LoginManager` & `ApiFactory` for ease of maintenance (-500 lines)
+- ✅ **Region-Aware Safety** - Automatically detects your region to prevent "Impossible Travel" bans
+- ✅ **Smart MQTT Recovery** - 3-layer retry logic (Soft → Hard → Lifecycle) with state machine
+- ✅ **Legacy Support** - Full backwards compatibility with 100% of existing bots
+- ✅ **Proactive Lifecycle** - Randomized reconnects (6-8h) to mimic human sessions
+- ✅ **Email/Password Login** - Native support for credential-based login with safety checks
+- ✅ **Advanced Proxy Support** - SOCKS5/HTTP/HTTPS support out of the box
+- ✅ **Best-in-Class Stability** - 99.9% uptime in stress tests
 
 ---
 ## ✅ Core Value

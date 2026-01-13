@@ -1,0 +1,13 @@
+# Exclude from NPM package
+tests/
+examples/
+appstate.json
+fca-config.json
+.vscode
+.idea
+*.log
+index.js.backup
+.gitignore
+.npmignore
+coverage/
+docs/
