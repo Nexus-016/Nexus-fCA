@@ -393,7 +393,8 @@ function buildStream(options, WebSocket, Proxy) {
     Stream.setWritable(Proxy);
     Stream.emit("connect");
     // Configurable ping interval for better connection stability
-    const pingMs = parseInt(process.env.NEXUS_MQTT_PING_INTERVAL, 10) || 30000;
+    // Default 45s (within 60s keepalive window)
+    const pingMs = parseInt(process.env.NEXUS_MQTT_PING_INTERVAL, 10) || 45000;
     pingInterval = setInterval(() => {
       if (WebSocket.readyState === WebSocket.OPEN) {
         try {
@@ -418,29 +419,37 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
 
   // === CONNECTION STATE MACHINE ===
   // Prevents multiple simultaneous reconnection attempts
-  // States: DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING
+  // States: DISCONNECTED → CONNECTING  // Connection State Machine & Guard
   if (!ctx._mqttState) {
     ctx._mqttState = {
       current: 'DISCONNECTED',
-      lastTransition: Date.now(),
+      lastTransition: 0,
       reconnectInProgress: false
     };
   }
 
-  // Prevent multiple simultaneous connection attempts
-  if (ctx._mqttState.reconnectInProgress) {
-    const elapsed = Date.now() - ctx._mqttState.lastTransition;
-    if (elapsed < 5000) { // Less than 5 seconds since last attempt
-      log.warn('listenMqtt', `⚠️ Blocked duplicate reconnect attempt (${elapsed}ms since last). State: ${ctx._mqttState.current}`);
-      return; // Exit early to prevent race condition
+  const now = Date.now();
+  const timeSinceLast = now - ctx._mqttState.lastTransition;
+
+  // STRICT GUARD: If we are already connecting, BLOCK EVERYTHING.
+  // Unless it's been stuck for > 45 seconds, then allow force reset.
+  if (ctx._mqttState.current === 'CONNECTING') {
+    if (timeSinceLast < 45000) {
+      // Only log if it's been a while (e.g. > 5 seconds) to avoid spamming logs every 3ms
+      if (timeSinceLast > 5000) {
+        log.warn('listenMqtt', `⚠️ Connection in progress... ignoring duplicate request (${timeSinceLast}ms).`);
+      }
+      return;
+    } else {
+      log.warn('listenMqtt', `⚠️ Connection STUCK in CONNECTING for ${timeSinceLast}ms. Forcing reset.`);
+      try { ctx.mqttClient.end(true); } catch (_) { }
     }
   }
 
-  // Mark reconnection in progress
-  ctx._mqttState.reconnectInProgress = true;
+  // Update state immediately to block concurrent calls
   ctx._mqttState.current = 'CONNECTING';
-  ctx._mqttState.lastTransition = Date.now();
-
+  ctx._mqttState.lastTransition = now;
+  ctx._mqttState.reconnectInProgress = true;
   const verboseMqtt = (ctx.globalOptions && ctx.globalOptions.verboseMqtt) || process.env.NEXUS_VERBOSE_MQTT === '1';
   if (verboseMqtt) {
     log.info('listenMqtt', `🔄 State transition: ${ctx._mqttState.current} (attempt start)`);
@@ -556,10 +565,13 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       protocolVersion: 13,
       binaryType: "arraybuffer",
     },
-    keepalive: 30,
+    keepalive: 60, // Increased from 30s to 60s (standard) to tolerate event loop lag
     reschedulePings: true,
-    reconnectPeriod: 1000,
-    connectTimeout: 5000,
+    reconnectPeriod: 5000, // Increased: 1s -> 5s to prevent rapid loops
+    connectTimeout: 30000, // Increased: 5s -> 30s to allow slow connections under load
+    // Disable clean session to potentially recover missed messages, 
+    // but typically Facebook requires clean:true for web clients. keeping true.
+    clean: true,
   };
   // Proxy support via option or environment
   if (ctx.globalOptions.proxy === undefined) {
@@ -604,7 +616,11 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       return globalCallback({ type: "not_logged_in", error: errMsg });
     }
     if (ctx.globalOptions.autoReconnect) {
-      // WS3-style: fetch SeqID then reconnect to ensure fresh state
+      if (ctx._mqttState) {
+        ctx._mqttState.current = 'DISCONNECTED';
+        ctx._mqttState.reconnectInProgress = false;
+      }
+      //fetch SeqID then reconnect to ensure fresh state
       fetchSeqID(defaultFuncs, api, ctx, (err) => {
         if (err) {
           log.warn("listenMqtt", "Failed to refresh SeqID on error, falling back to adaptive reconnect...");
@@ -657,6 +673,10 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
         resetStormGuard(ctx);
         reconnectReason = 'close-long';
       }
+      if (ctx._mqttState) {
+        ctx._mqttState.current = 'DISCONNECTED';
+        ctx._mqttState.reconnectInProgress = false;
+      }
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reconnectReason);
     }
   });
@@ -696,6 +716,10 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
         resetBackoff(backoffState);
         resetStormGuard(ctx);
         reconnectReason = 'disconnect-long';
+      }
+      if (ctx._mqttState) {
+        ctx._mqttState.current = 'DISCONNECTED';
+        ctx._mqttState.reconnectInProgress = false;
       }
       scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reconnectReason);
     }
@@ -851,7 +875,21 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
         if (ctx.tmsWait && typeof ctx.tmsWait == "function") { ctx.tmsWait(); }
         if (jsonMessage.firstDeltaSeqId && jsonMessage.syncToken) { ctx.lastSeqId = jsonMessage.firstDeltaSeqId; ctx.syncToken = jsonMessage.syncToken; }
         if (jsonMessage.lastIssuedSeqId) { ctx.lastSeqId = parseInt(jsonMessage.lastIssuedSeqId); }
-        for (const i in jsonMessage.deltas) { const delta = jsonMessage.deltas[i]; parseDelta(defaultFuncs, api, ctx, globalCallback, { delta: delta, }); }
+        if (jsonMessage.lastIssuedSeqId) { ctx.lastSeqId = parseInt(jsonMessage.lastIssuedSeqId); }
+
+        // High Load Optimization: Process deltas asynchronously to prevent Event Loop Starvation
+        // causing MQTT heartbeats to miss their deadline and disconnect.
+        if (jsonMessage.deltas) {
+          jsonMessage.deltas.forEach((delta) => {
+            setImmediate(() => {
+              try {
+                parseDelta(defaultFuncs, api, ctx, globalCallback, { delta: delta });
+              } catch (e) {
+                log.error("listenMqtt", `Delta processing error: ${e.message}`);
+              }
+            });
+          });
+        }
       } else if (topic === "/thread_typing" || topic === "/orca_typing_notifications") {
         const typ = { type: "typ", isTyping: !!jsonMessage.state, from: jsonMessage.sender_fbid.toString(), threadID: utils.formatID((jsonMessage.thread || jsonMessage.sender_fbid).toString()), };
         (function () { globalCallback(null, typ); })();
@@ -947,7 +985,8 @@ function parseDelta(defaultFuncs, api, ctx, globalCallback, { delta }) {
         }
         if (fmtMsg) {
           if (ctx.globalOptions.autoMarkDelivery) {
-            markDelivery(ctx, api, fmtMsg.threadID, fmtMsg.messageID);
+            // Non-blocking mark delivered to improve performance
+            setImmediate(() => markDelivery(ctx, api, fmtMsg.threadID, fmtMsg.messageID));
           }
           if (!ctx.globalOptions.selfListen && fmtMsg.senderID === ctx.userID)
             return;

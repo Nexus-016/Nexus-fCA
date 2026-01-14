@@ -1,7 +1,7 @@
 {
   "name": "nexus-fca",
-  "version": "3.2.0",
-  "description": "Nexus-FCA 3.2 – THE BEST, SAFEST, MOST STABLE Facebook Messenger API!",
+  "version": "3.2.1",
+  "description": "Nexus-FCA 3.2.1 – High-Performance, Stable, Safe Facebook Messenger API.",
   "main": "index.js",
   "repository": {
     "type": "git",
