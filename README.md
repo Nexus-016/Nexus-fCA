@@ -187,6 +187,7 @@ const login = require('nexus-fca');
 ## 📚 Documentation Map
 | Resource | Location |
 |----------|----------|
+| **Usage Guide (Examples)** | `USAGE-GUIDE.md` |
 | Full API Reference | `DOCS.md` |
 | Feature Guides | `docs/*.md` |
 | Configuration Reference | `docs/configuration-reference.md` |

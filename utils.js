@@ -87,23 +87,44 @@ function getJar() {
 }
 
 function getHeaders(url, options, ctx, customHeader) {
+    const ua = (options?.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+    const isWindows = ua.includes("Windows NT");
+    const isAndroid = ua.includes("Android");
+    const isChrome = ua.includes("Chrome") && !ua.includes("Edg");
+
     var headers = {
         Referer: "https://www.facebook.com/",
         Host: url.replace("https://", "").split("/")[0],
         Origin: "https://www.facebook.com",
-        "user-agent": (options?.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+        "user-agent": ua,
         Connection: "keep-alive",
-        "sec-fetch-site": 'same-origin',
-        "sec-fetch-mode": 'cors',
-        "sec-fetch-dest": "empty",
         "accept": "*/*",
         "accept-language": "en-US,en;q=0.9",
-        "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
         "dnt": "1",
         "upgrade-insecure-requests": "1"
     };
+
+    // Human-like Fetch headers
+    if (url.includes("/api/graphql/") || url.includes("/messaging/")) {
+        headers["sec-fetch-site"] = 'same-origin';
+        headers["sec-fetch-mode"] = 'cors';
+        headers["sec-fetch-dest"] = "empty";
+    } else {
+        headers["sec-fetch-site"] = 'none';
+        headers["sec-fetch-mode"] = 'navigate';
+        headers["sec-fetch-dest"] = "document";
+    }
+
+    // Dynamic Client Hints - CRITICAL: Must match User-Agent
+    if (isChrome && isWindows) {
+        headers["sec-ch-ua"] = '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"';
+        headers["sec-ch-ua-mobile"] = "?0";
+        headers["sec-ch-ua-platform"] = '"Windows"';
+    } else if (isAndroid) {
+        headers["sec-ch-ua-mobile"] = "?1";
+        // Remove Windows-specific headers for Android UAs
+    }
+
     if (customHeader) Object.assign(headers, customHeader);
     if (ctx && ctx.region) headers["X-MSGR-Region"] = ctx.region;
 
