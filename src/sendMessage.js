@@ -198,11 +198,11 @@ module.exports = function (defaultFuncs, api, ctx) {
 			form["audio_ids"] = [];
 
 			if (utils.getType(msg.attachment) !== "Array") msg.attachment = [msg.attachment];
-			if (msg.attachment.every(e=>/_id$/.test(e[0]))) {
+			if (msg.attachment.every(e => /_id$/.test(e[0]))) {
 				//console.log(msg.attachment)
-				msg.attachment.map(e=>form[`${e[0]}s`].push(e[1]));
+				msg.attachment.map(e => form[`${e[0]}s`].push(e[1]));
 				return cb();
-			  }
+			}
 			uploadAttachment(msg.attachment, function (err, files) {
 				if (err) return callback(err);
 				files.forEach(function (file) {
@@ -307,7 +307,12 @@ module.exports = function (defaultFuncs, api, ctx) {
 			manual_retry_cnt: "0",
 			has_attachment: !!(msg.attachment || msg.url || msg.sticker),
 			signatureID: utils.getSignatureID(),
-			replied_to_message_id: replyToMessage
+			replied_to_message_id: replyToMessage,
+			reply_metadata: replyToMessage ? {
+				reply_source_id: replyToMessage,
+				reply_source_type: 1, // 1: Message
+				reply_type: 0 // 0: Reply
+			} : undefined
 		};
 
 		handleLocation(msg, form, callback, () =>

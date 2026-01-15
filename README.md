@@ -2,18 +2,16 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="520" />
 </p>
 
-# Nexus-FCA v3.2.1 🚀
+# Nexus-FCA v3.2.2 🚀
 
-> **The Most Advanced, Safe & High-Performance Facebook Chat API.**
-> *Built by Team Nexus under the Nex-Core Project.*
+> **High-Performance, Stable, Safe Facebook Messenger API**  
+> *Now with Stable Reconnects & Quoted Replies*
 
-![Nexus-FCA Banner](https://i.imgur.com/example-banner.png)
-
-## ⚡ What's New in v3.2.1? (High-Load Update)
-
+## 🔥 New in v3.2.2
+- **💬 Fixed Reply Quoting**: Messages now correctly quote the original message using updated `reply_metadata`.
 - **🏎️ Async Event Engine**: Non-blocking message processing prevents event loop starvation even under 1000+ msgs/min load.
 - **🛡️ Smart Keepalive**: Adaptive 60s heartbeats with 45s pings ensure connection stays alive during CPU spikes.
-- **🔄 Zombie-Proof Reconnects**: Automatically detects and resets 'stuck' connections (Zombie Mode), ensuring 24/7 reliability.
+- **🔄 Stable Reconnects**: Automatically detects and resets 'stuck' connections (Stable Mode), ensuring 24/7 reliability.
 - **💾 Memory Optimized**: 50% lighter core memory footprint compared to legacy FCA versions.
 - **✨ Stability**: 99.99% uptime guaranteed in high-traffic groups.
 
