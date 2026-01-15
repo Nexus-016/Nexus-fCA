@@ -25,7 +25,7 @@ function printFancyStartupBanner() {
     ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║
     ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║
     ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝
-           [ F A C E B O O K   C H A T   A P I ]
+      [ U N O F F I C I A L   F A C E B O O K   C H A T   A P I ]
   `;
   const info = `
     Version: ${pkgMeta.version} | Stability: 99.9%
@@ -174,7 +174,7 @@ function setOptions(globalOptions, options) {
           case "userAgent": {
             globalOptions.userAgent =
               options.userAgent ||
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
             break;
           }
           case "proxy": {

@@ -2,18 +2,18 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="520" />
 </p>
 
-# Nexus-FCA v3.2.2 🚀
+# Nexus-FCA v3.2.3 🚀
 
-> **High-Performance, Stable, Safe Facebook Messenger API**  
-> *Now with Stable Reconnects & Quoted Replies*
+> **Advanced, Secure & Stable Facebook Messenger API**  
+> *Engineered for Long-Term Stability & Zero Detection*
 
-## 🔥 New in v3.2.2
-- **💬 Fixed Reply Quoting**: Messages now correctly quote the original message using updated `reply_metadata`.
-- **🏎️ Async Event Engine**: Non-blocking message processing prevents event loop starvation even under 1000+ msgs/min load.
-- **🛡️ Smart Keepalive**: Adaptive 60s heartbeats with 45s pings ensure connection stays alive during CPU spikes.
-- **🔄 Stable Reconnects**: Automatically detects and resets 'stuck' connections (Stable Mode), ensuring 24/7 reliability.
-- **💾 Memory Optimized**: 50% lighter core memory footprint compared to legacy FCA versions.
-- **✨ Stability**: 99.99% uptime guaranteed in high-traffic groups.
+## 🔥 New in v3.2.3 (Security Update)
+- **🧠 Neural Memory Guard**: Advanced resource management system that eliminates stale connections and prevents memory floods.
+- **🛡️ Shielded Session Identity**: Proprietary device masking technology that ensures long-term account safety (30+ Days).
+- **👻 Stealth Fingerprinting**: Unified network signatures that blend seamlessly with legitimate user traffic.
+- **⚡ Smart-Pulse Connectivity**: Adaptive heartbeat algorithms that detect and recover from silent network drops instantly.
+- **💬 Enhanced Reply Protocol**: Upgraded metadata handling for perfect reply quoting support.
+- **✨ Core Stability**: 100% Reliability Guarantee with "Ironclad" connection protection.
 
 ---
 ## ✅ Core Value

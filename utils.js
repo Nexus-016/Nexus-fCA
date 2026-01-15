@@ -59,8 +59,8 @@ function getAgent(url) {
 function getJar() {
     const jar = new CookieJar();
     const originalSetCookie = jar.setCookie;
-    
-    jar.setCookie = function(cookieOrStr, uri, options, callback) {
+
+    jar.setCookie = function (cookieOrStr, uri, options, callback) {
         if (typeof options === 'function') {
             callback = options;
             options = {};
@@ -70,10 +70,10 @@ function getJar() {
         }
         return jar.setCookieSync(cookieOrStr, uri, options || {});
     };
-    
+
     const originalGetCookies = jar.getCookies;
-    jar.getCookies = function(uri, options, callback) {
-         if (typeof options === 'function') {
+    jar.getCookies = function (uri, options, callback) {
+        if (typeof options === 'function') {
             callback = options;
             options = {};
         }
@@ -182,10 +182,10 @@ async function post(url, jar, form, options, ctx, customHeader) {
     if (form) {
         // 1. Clean null/undefined
         form = cleanObject(form);
-        
+
         // 2. Check Content-Type
         let contentType = headers['Content-Type'] || 'application/x-www-form-urlencoded';
-        
+
         if (contentType.includes('json')) {
             op.body = JSON.stringify(form);
         } else {
@@ -367,23 +367,41 @@ function generatePresence(userID) {
 }
 
 function getGUID() {
-    /** @type {number} */
+    // 1. Check Environment Variable (Best for Render/Heroku/Replit)
+    if (process.env.NEXUS_DEVICE_ID) {
+        return process.env.NEXUS_DEVICE_ID;
+    }
 
+    var devicePath = require("path").join(process.cwd(), "nexus_device.json");
+    var fs = require("fs");
+
+    // 2. Check File System (Local Persistence)
+    try {
+        if (fs.existsSync(devicePath)) {
+            var data = JSON.parse(fs.readFileSync(devicePath, "utf8"));
+            if (data && data.guid) return data.guid;
+        }
+    } catch (e) { }
+
+    // 3. Generate New Device ID
     var sectionLength = Date.now();
-    /** @type {string} */
-
     var id = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
-        /** @type {number} */
-
         var r = Math.floor((sectionLength + Math.random() * 16) % 16);
-        /** @type {number} */
-
         sectionLength = Math.floor(sectionLength / 16);
-        /** @type {string} */
-
         var _guid = (c == "x" ? r : (r & 7) | 8).toString(16);
         return _guid;
     });
+
+    // 4. Save & Log
+    try {
+        fs.writeFileSync(devicePath, JSON.stringify({ guid: id, generatedAt: Date.now() }, null, 2));
+    } catch (e) { }
+
+    // Warn user to verify persistence
+    var log = require("npmlog");
+    log.warn("NEXUS-FCA", "New Device ID generated: " + id);
+    log.warn("NEXUS-FCA", ">>> IF ON RENDER/HEROKU: Add 'NEXUS_DEVICE_ID' = '" + id + "' to your Environment Variables to prevent bans! <<<");
+
     return id;
 }
 
@@ -1038,7 +1056,7 @@ function generateTimestampRelative() {
 function makeDefaults(html, userID, ctx) {
     var reqCounter = 1;
     let fb_dtsg = null;
-    
+
     // Robust fb_dtsg extraction
     const dtsgRegexes = [
         /"DTSGInitData",\[\],{"token":"(.*?)"/,
@@ -1048,7 +1066,7 @@ function makeDefaults(html, userID, ctx) {
         /name="fb_dtsg" value="(.*?)"/,
         /name="dtsg_ag" value="(.*?)"/
     ];
-    
+
     for (const regex of dtsgRegexes) {
         const match = html.match(regex);
         if (match && match[1]) {
@@ -1056,7 +1074,7 @@ function makeDefaults(html, userID, ctx) {
             break;
         }
     }
-    
+
     // Fallback to ctx if not found in HTML (or if HTML is partial)
     if (!fb_dtsg && ctx.fb_dtsg) {
         fb_dtsg = ctx.fb_dtsg;
@@ -1066,7 +1084,7 @@ function makeDefaults(html, userID, ctx) {
     if (fb_dtsg) {
         for (var i = 0; i < fb_dtsg.length; i++) ttstamp += fb_dtsg.charCodeAt(i);
     }
-    
+
     var revision = getFrom(html, 'revision":', ",");
     function mergeWithDefaults(obj) {
         var newObj = {
@@ -1110,7 +1128,7 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
     return function (data) {
         return tryPromise(function () {
             log.verbose("parseAndCheckLogin", data.body);
-            
+
             // GOT compatibility: map request properties
             const request = data.request;
             const requestUrl = request.options ? request.options.url : request.uri;
@@ -1135,10 +1153,10 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
                     "parseAndCheckLogin",
                     `Got status code ${data.statusCode} - Retrying in ${retryTime}ms...`
                 );
-                
+
                 const url = requestUrl.toString();
                 const contentType = requestHeaders?.["content-type"]?.split(";")[0];
-                
+
                 return delay(retryTime)
                     .then(() =>
                         contentType === "multipart/form-data"
@@ -1279,14 +1297,14 @@ function saveCookies(jar) {
             if (c.indexOf(".facebook.com") > -1 || c.indexOf("facebook.com") > -1) {
                 try {
                     jar.setCookie(c, "https://www.facebook.com");
-                } catch (e) {}
-                
+                } catch (e) { }
+
                 try {
                     var c_messenger = c.replace(/domain=\.?facebook\.com/i, "domain=.messenger.com");
                     if (c_messenger.indexOf(".messenger.com") > -1) {
                         jar.setCookie(c_messenger, "https://www.messenger.com");
                     }
-                } catch (e) {}
+                } catch (e) { }
             }
         });
         return res;
@@ -1522,115 +1540,115 @@ function checkLiveCookie(ctx, defaultFuncs) {
  * Intelligent request management to minimize Facebook account risks
  */
 const smartSafetyLimiter = {
-  userSessions: {},
-  
-  // Human-like delay patterns to avoid detection
-  humanDelays: {
-    typing: { min: 800, max: 2000 },
-    reading: { min: 1000, max: 3000 },
-    thinking: { min: 2000, max: 5000 },
-    browsing: { min: 500, max: 1500 }
-  },
-  
-  // Risk level assessment
-  assessRisk(userID, action) {
-    if (!this.userSessions[userID]) {
-      this.userSessions[userID] = {
-        requestCount: 0,
-        errorCount: 0,
-        lastActivity: Date.now(),
-        riskLevel: 'low'
-      };
+    userSessions: {},
+
+    // Human-like delay patterns to avoid detection
+    humanDelays: {
+        typing: { min: 800, max: 2000 },
+        reading: { min: 1000, max: 3000 },
+        thinking: { min: 2000, max: 5000 },
+        browsing: { min: 500, max: 1500 }
+    },
+
+    // Risk level assessment
+    assessRisk(userID, action) {
+        if (!this.userSessions[userID]) {
+            this.userSessions[userID] = {
+                requestCount: 0,
+                errorCount: 0,
+                lastActivity: Date.now(),
+                riskLevel: 'low'
+            };
+        }
+
+        const session = this.userSessions[userID];
+        const timeSinceLastActivity = Date.now() - session.lastActivity;
+        const errorRate = session.errorCount / Math.max(1, session.requestCount);
+
+        // Update risk level based on activity patterns - ULTRA SAFE TUNING
+        if (errorRate > 0.2 || timeSinceLastActivity < 800) { // Stricter error threshold (0.2 vs 0.3)
+            session.riskLevel = 'high';
+        } else if (errorRate > 0.05 || timeSinceLastActivity < 2000) { // Stricter medium threshold
+            session.riskLevel = 'medium';
+        } else {
+            session.riskLevel = 'low';
+        }
+
+        return session.riskLevel;
+    },
+
+    // Get safe delay based on risk level and action type
+    getSafeDelay(userID, action = 'browsing') {
+        const riskLevel = this.assessRisk(userID, action);
+        const baseDelay = this.humanDelays[action] || this.humanDelays.browsing;
+
+        // Risk multipliers for safety
+        const riskMultipliers = {
+            'low': 1,
+            'medium': 1.5,
+            'high': 2.5
+        };
+
+        const multiplier = riskMultipliers[riskLevel] || 1;
+        const min = baseDelay.min * multiplier;
+        const max = baseDelay.max * multiplier;
+
+        // Generate human-like random delay
+        const baseDelayTime = Math.random() * (max - min) + min;
+        const humanVariation = baseDelayTime * 0.1 * (Math.random() - 0.5);
+
+        return Math.max(200, Math.floor(baseDelayTime + humanVariation));
+    },
+
+    // Record activity for safety metrics
+    recordActivity(userID, isError = false) {
+        if (!this.userSessions[userID]) {
+            this.userSessions[userID] = {
+                requestCount: 0,
+                errorCount: 0,
+                lastActivity: Date.now(),
+                riskLevel: 'low'
+            };
+        }
+
+        const session = this.userSessions[userID];
+        session.requestCount++;
+        session.lastActivity = Date.now();
+
+        if (isError) {
+            session.errorCount++;
+        }
+
+        // Auto-reset metrics every hour to prevent false risk escalation
+        if (session.requestCount > 100) {
+            session.requestCount = Math.floor(session.requestCount / 2);
+            session.errorCount = Math.floor(session.errorCount / 2);
+        }
+    },
+
+    // Check if action is safe to proceed
+    isSafeToExecute(userID, action) {
+        const riskLevel = this.assessRisk(userID, action);
+
+        // Always allow low risk actions
+        if (riskLevel === 'low') return true;
+
+        // For higher risk, check recent activity
+        const session = this.userSessions[userID];
+        const timeSinceLastActivity = Date.now() - session.lastActivity;
+
+        // Medium risk: ensure some delay between actions
+        if (riskLevel === 'medium' && timeSinceLastActivity < 3000) {
+            return false;
+        }
+
+        // High risk: require longer delays
+        if (riskLevel === 'high' && timeSinceLastActivity < 10000) {
+            return false;
+        }
+
+        return true;
     }
-    
-    const session = this.userSessions[userID];
-    const timeSinceLastActivity = Date.now() - session.lastActivity;
-    const errorRate = session.errorCount / Math.max(1, session.requestCount);
-    
-    // Update risk level based on activity patterns - ULTRA SAFE TUNING
-    if (errorRate > 0.2 || timeSinceLastActivity < 800) { // Stricter error threshold (0.2 vs 0.3)
-      session.riskLevel = 'high';
-    } else if (errorRate > 0.05 || timeSinceLastActivity < 2000) { // Stricter medium threshold
-      session.riskLevel = 'medium';
-    } else {
-      session.riskLevel = 'low';
-    }
-    
-    return session.riskLevel;
-  },
-  
-  // Get safe delay based on risk level and action type
-  getSafeDelay(userID, action = 'browsing') {
-    const riskLevel = this.assessRisk(userID, action);
-    const baseDelay = this.humanDelays[action] || this.humanDelays.browsing;
-    
-    // Risk multipliers for safety
-    const riskMultipliers = {
-      'low': 1,
-      'medium': 1.5,
-      'high': 2.5
-    };
-    
-    const multiplier = riskMultipliers[riskLevel] || 1;
-    const min = baseDelay.min * multiplier;
-    const max = baseDelay.max * multiplier;
-    
-    // Generate human-like random delay
-    const baseDelayTime = Math.random() * (max - min) + min;
-    const humanVariation = baseDelayTime * 0.1 * (Math.random() - 0.5);
-    
-    return Math.max(200, Math.floor(baseDelayTime + humanVariation));
-  },
-  
-  // Record activity for safety metrics
-  recordActivity(userID, isError = false) {
-    if (!this.userSessions[userID]) {
-      this.userSessions[userID] = {
-        requestCount: 0,
-        errorCount: 0,
-        lastActivity: Date.now(),
-        riskLevel: 'low'
-      };
-    }
-    
-    const session = this.userSessions[userID];
-    session.requestCount++;
-    session.lastActivity = Date.now();
-    
-    if (isError) {
-      session.errorCount++;
-    }
-    
-    // Auto-reset metrics every hour to prevent false risk escalation
-    if (session.requestCount > 100) {
-      session.requestCount = Math.floor(session.requestCount / 2);
-      session.errorCount = Math.floor(session.errorCount / 2);
-    }
-  },
-  
-  // Check if action is safe to proceed
-  isSafeToExecute(userID, action) {
-    const riskLevel = this.assessRisk(userID, action);
-    
-    // Always allow low risk actions
-    if (riskLevel === 'low') return true;
-    
-    // For higher risk, check recent activity
-    const session = this.userSessions[userID];
-    const timeSinceLastActivity = Date.now() - session.lastActivity;
-    
-    // Medium risk: ensure some delay between actions
-    if (riskLevel === 'medium' && timeSinceLastActivity < 3000) {
-      return false;
-    }
-    
-    // High risk: require longer delays
-    if (riskLevel === 'high' && timeSinceLastActivity < 10000) {
-      return false;
-    }
-    
-    return true;
-  }
 };
 
 /**
@@ -1647,20 +1665,20 @@ const allowList = process.env.NEXUS_FCA_ALLOW_LIST ? process.env.NEXUS_FCA_ALLOW
 const blockList = process.env.NEXUS_FCA_BLOCK_LIST ? process.env.NEXUS_FCA_BLOCK_LIST.split(',') : null;
 
 function isUserAllowed(userID) {
-  if (blockList && blockList.includes(userID)) return false;
-  if (allowList && !allowList.includes(userID)) return false;
-  return true;
+    if (blockList && blockList.includes(userID)) return false;
+    if (allowList && !allowList.includes(userID)) return false;
+    return true;
 }
 
 // Legacy rate limiter - kept for backward compatibility but optimized for safety
 const rateLimiter = {
-  limits: {},
-  windowMs: 60 * 1000,
-  max: 20,
-  check(userID, action) {
-    // Use smart safety limiter instead of blocking
-    return smartSafetyLimiter.isSafeToExecute(userID, action);
-  }
+    limits: {},
+    windowMs: 60 * 1000,
+    max: 20,
+    check(userID, action) {
+        // Use smart safety limiter instead of blocking
+        return smartSafetyLimiter.isSafeToExecute(userID, action);
+    }
 };
 
 // Add robust session validation utility used by listenMqtt

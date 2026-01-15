@@ -394,7 +394,7 @@ function buildStream(options, WebSocket, Proxy) {
     Stream.emit("connect");
     // Configurable ping interval for better connection stability
     // Default 45s (within 60s keepalive window)
-    const pingMs = parseInt(process.env.NEXUS_MQTT_PING_INTERVAL, 10) || 45000;
+    const pingMs = parseInt(process.env.NEXUS_MQTT_PING_INTERVAL, 10) || 9000;
     pingInterval = setInterval(() => {
       if (WebSocket.readyState === WebSocket.OPEN) {
         try {
@@ -548,7 +548,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
         Origin: "https://www.facebook.com",
         "User-Agent":
           ctx.globalOptions.userAgent ||
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         Referer: "https://www.facebook.com/",
         Host: "edge-chat.facebook.com",
         Connection: "Upgrade",
@@ -565,12 +565,10 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       protocolVersion: 13,
       binaryType: "arraybuffer",
     },
-    keepalive: 60, // Increased from 30s to 60s (standard) to tolerate event loop lag
+    keepalive: 10, // Reduced to 10s (matches ws3-fca) to prevent NAT timeouts and silent drops
     reschedulePings: true,
-    reconnectPeriod: 5000, // Increased: 1s -> 5s to prevent rapid loops
-    connectTimeout: 30000, // Increased: 5s -> 30s to allow slow connections under load
-    // Disable clean session to potentially recover missed messages, 
-    // but typically Facebook requires clean:true for web clients. keeping true.
+    reconnectPeriod: 5000,
+    connectTimeout: 60000, // Matches ws3-fca for slower connections
     clean: true,
   };
   // Proxy support via option or environment
@@ -589,20 +587,38 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   // Create raw WebSocket first so we can attach diagnostics hooks.
   const rawWs = new WebSocket(host, options.wsOptions);
   try { require('../lib/mqtt/MqttDiagnostics')(rawWs, ctx, log); } catch (_) { }
+  // Ensure we don't have zombie clients from previous attempts
+  if (ctx.mqttClient) {
+    try {
+      ctx.mqttClient.removeAllListeners();
+      ctx.mqttClient.on('error', () => { }); // Silence errors on dead client
+      ctx.mqttClient.end(true);
+    } catch (_) { }
+    ctx.mqttClient = undefined;
+  }
+
+  // Define new client
   ctx.mqttClient = new mqtt.Client(
     () => buildStream(options, rawWs, buildProxy()),
     options
   );
+
   if (verboseMqtt) {
     log.info('listenMqtt', `MQTT bridge dialing ${host}`);
   }
   const mqttClient = ctx.mqttClient;
   global.mqttClient = mqttClient;
+
+  // Cleanup/Anti-Loop flag
+  ctx._reconnectScheduled = false;
+
   mqttClient.on('error', function (err) {
     const errMsg = (err && (err.error || err.message || "")).toString();
     ctx.health.onError(errMsg.includes('not logged in') ? 'not_logged_in' : 'mqtt_error');
+
     // Increment failure counter for health tracking
     if (ctx.health && typeof ctx.health.incFailure === 'function') ctx.health.incFailure();
+
     if (!errMsg) {
       log.error('listenMqtt', 'Empty error message (mqtt error event). Raw err object: ' + JSON.stringify(Object.getOwnPropertyNames(err || {}).reduce((a, k) => { a[k] = err[k]; return a; }, {})));
     }
@@ -610,16 +626,24 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       log.error('listenMqtt', `MQTT error after ${(Date.now() - attemptStartTs)}ms: ${errMsg}`);
     }
     log.error("listenMqtt", errMsg);
+
     try { mqttClient.end(true); } catch (_) { }
+
     if (/not logged in|login_redirect|html_login_page/i.test(errMsg)) {
       ctx.loggedIn = false;
       return globalCallback({ type: "not_logged_in", error: errMsg });
     }
+
     if (ctx.globalOptions.autoReconnect) {
       if (ctx._mqttState) {
         ctx._mqttState.current = 'DISCONNECTED';
         ctx._mqttState.reconnectInProgress = false;
       }
+
+      // Prevent double-reconnect from close handler
+      if (ctx._reconnectScheduled) return;
+      ctx._reconnectScheduled = true;
+
       //fetch SeqID then reconnect to ensure fresh state
       fetchSeqID(defaultFuncs, api, ctx, (err) => {
         if (err) {
@@ -635,6 +659,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
         .catch(() => globalCallback({ type: "account_inactive", error: "Maybe your account is blocked by facebook, please login and check at https://facebook.com" }));
     }
   });
+
   // Ensure reconnection also triggers on unexpected close without prior error
   mqttClient.on('close', function () {
     ctx.health.onDisconnect();
@@ -648,9 +673,11 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     const guard = duration < shortWindowMs ? noteStormEvent(ctx) : getStormGuard(ctx);
     const allowLog = shouldLogStorm(guard);
     const stormSuffix = guard && guard.active ? ` [storm:${guard.events.length}/${Math.round(guard.windowMs / 60000)}m]` : '';
+
     if (guard && guard.active) {
       scheduleStormRecovery(ctx, api, defaultFuncs, guard);
     }
+
     // Treat long-lived connections as normal lifecycle, keep logs calm
     if (duration >= 30 * 60 * 1000) { // >= 30 minutes
       if (allowLog) log.info('listenMqtt', `MQTT connection closed after ${seconds}s (normal lifecycle). Reconnecting...${stormSuffix}`);
@@ -663,7 +690,15 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     }
 
     if (!ctx.loggedIn) return; // avoid loops if logged out
+
     if (ctx.globalOptions.autoReconnect) {
+      // If error handler already scheduled a reconnect, don't do it again
+      if (ctx._reconnectScheduled) {
+        log.verbose('listenMqtt', 'Reconnect already scheduled by error handler. Skipping duplicate.');
+        return;
+      }
+      ctx._reconnectScheduled = true;
+
       const backoffState = getBackoffState(ctx);
       const resetThreshold = backoffState.resetAfterMs || (3 * 60 * 1000);
       let reconnectReason = 'close';
