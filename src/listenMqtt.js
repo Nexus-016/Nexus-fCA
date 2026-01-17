@@ -203,11 +203,18 @@ function startForegroundRefresh(ctx) {
     clearInterval(ctx._foregroundRefreshInterval);
     ctx._foregroundRefreshInterval = null;
   }
+  if (ctx._presenceRefreshInterval) {
+    clearInterval(ctx._presenceRefreshInterval);
+    ctx._presenceRefreshInterval = null;
+  }
   const options = ctx.globalOptions || {};
   if (options.foregroundRefreshEnabled === false) return;
+  
+  // Foreground state refresh - reduced from 15min to 1min for better activity signal
   const minutes = Number.isFinite(options.foregroundRefreshMinutes)
-    ? Math.max(1, options.foregroundRefreshMinutes)
-    : 15;
+    ? Math.max(0.5, options.foregroundRefreshMinutes)
+    : 1; // Changed: 15 → 1 minute (like ws3-fca approach)
+  
   ctx._foregroundRefreshInterval = setInterval(() => {
     if (!ctx.mqttClient || !ctx.mqttClient.connected) return;
     try {
@@ -224,11 +231,32 @@ function startForegroundRefresh(ctx) {
       }
     }
   }, minutes * 60 * 1000);
+  
+  // ws3-fca style presence signal - sends activity indicator every 50s
+  // This prevents Facebook from marking connection as idle/background
+  const presenceIntervalSec = Number.isFinite(options.presenceRefreshSeconds)
+    ? Math.max(30, options.presenceRefreshSeconds)
+    : 50; // ws3-fca uses 50 seconds
+  
+  ctx._presenceRefreshInterval = setInterval(() => {
+    if (!ctx.mqttClient || !ctx.mqttClient.connected) return;
+    try {
+      // Generate presence payload like ws3-fca
+      const presencePayload = utils.generatePresence(ctx.userID);
+      ctx.mqttClient.publish("/t_p", presencePayload, { qos: 0, retain: false });
+    } catch (err) {
+      // Silent fail for presence - not critical
+    }
+  }, presenceIntervalSec * 1000);
 }
 function stopForegroundRefresh(ctx) {
   if (ctx && ctx._foregroundRefreshInterval) {
     clearInterval(ctx._foregroundRefreshInterval);
     ctx._foregroundRefreshInterval = null;
+  }
+  if (ctx && ctx._presenceRefreshInterval) {
+    clearInterval(ctx._presenceRefreshInterval);
+    ctx._presenceRefreshInterval = null;
   }
 }
 function getStormGuard(ctx) {
@@ -503,8 +531,17 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   }
   const chatOn = (ctx.globalOptions && ctx.globalOptions.online === false) ? false : true;
   const foreground = getForegroundState(ctx);
+  
+  // ws3-fca style: Generate fresh sessionID and clientID on EACH reconnect
+  // This prevents Facebook from detecting "stale" sessions and force-disconnecting
   const sessionID = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) + 1;
+  const clientID = utils.generateClientID ? utils.generateClientID() : `mqttwsclient_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const GUID = utils.getGUID();
+  
+  // Store for debugging/tracking
+  ctx._lastSessionID = sessionID;
+  ctx._lastClientID = clientID;
+  
   const username = {
     u: ctx.userID,
     s: sessionID,
@@ -528,16 +565,26 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   };
   // jitter user agent keep consistent
   const cookies = ctx.jar.getCookies("https://www.facebook.com").join("; ");
+  
+  // MQTT Host Selection - ws3-fca uses messenger.com, we support both with option
+  // messenger.com endpoint appears more stable for some accounts
   let host;
+  const useMessengerDomain = ctx.globalOptions.mqttUseMessengerDomain;
+  const baseDomain = useMessengerDomain ? 'edge-chat.messenger.com' : 'edge-chat.facebook.com';
+  
   if (ctx.mqttEndpoint) {
-    host = `${ctx.mqttEndpoint}&sid=${sessionID}&cid=${GUID}`;
+    host = `${ctx.mqttEndpoint}&sid=${sessionID}&cid=${clientID}`;
   } else if (ctx.region) {
-    host = `wss://edge-chat.facebook.com/chat?region=${ctx.region.toLowerCase()}&sid=${sessionID}&cid=${GUID}`;
+    host = `wss://${baseDomain}/chat?region=${ctx.region.toLowerCase()}&sid=${sessionID}&cid=${clientID}`;
   } else {
-    host = `wss://edge-chat.facebook.com/chat?sid=${sessionID}&cid=${GUID}`;
+    host = `wss://${baseDomain}/chat?sid=${sessionID}&cid=${clientID}`;
   }
+  
+  // Determine Host header based on domain used
+  const hostHeader = useMessengerDomain ? 'edge-chat.messenger.com' : 'edge-chat.facebook.com';
+  
   const options = {
-    clientId: "mqttwsclient",
+    clientId: clientID, // Use dynamic clientID instead of static "mqttwsclient"
     protocolId: "MQIsdp",
     protocolVersion: 3,
     username: JSON.stringify(username),
@@ -550,7 +597,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
           ctx.globalOptions.userAgent ||
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         Referer: "https://www.facebook.com/",
-        Host: "edge-chat.facebook.com",
+        Host: hostHeader,
         Connection: "Upgrade",
         Pragma: "no-cache",
         "Cache-Control": "no-cache",
@@ -783,16 +830,16 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     ctx.health.onConnect();
 
     // WS3-style randomized proactive reconnect (tunable window).
-    // Changed: 2-4h → 6-8h to reduce unnecessary reconnects and improve stability
-    // Proactive reconnect prevents long-session forced disconnects by Facebook
+    // CRITICAL FIX: Changed from 6-8h to 45-90min based on ws3-fca analysis (26-60min)
+    // Long sessions (2h+) cause Facebook to force-disconnect, proactive reconnect prevents this
     if (ctx._reconnectTimer) clearTimeout(ctx._reconnectTimer);
     let reconnectTime = null;
     const opts = ctx.globalOptions || {};
     const proactiveEnabled = opts.mqttProactiveReconnectEnabled;
 
     if (proactiveEnabled !== false) {
-      const minM = Number.isFinite(opts.mqttProactiveReconnectMinMinutes) ? opts.mqttProactiveReconnectMinMinutes : 360; // Changed: 120min → 360min (6h)
-      const maxM = Number.isFinite(opts.mqttProactiveReconnectMaxMinutes) ? opts.mqttProactiveReconnectMaxMinutes : 480; // Changed: 240min → 480min (8h)
+      const minM = Number.isFinite(opts.mqttProactiveReconnectMinMinutes) ? opts.mqttProactiveReconnectMinMinutes : 45; // ws3-fca: 26min, we use 45min for safety margin
+      const maxM = Number.isFinite(opts.mqttProactiveReconnectMaxMinutes) ? opts.mqttProactiveReconnectMaxMinutes : 90; // ws3-fca: 60min, we use 90min for safety margin
       const min = Math.min(minM, maxM);
       const max = Math.max(minM, maxM);
       const intervalMinutes = Math.floor(Math.random() * (max - min + 1)) + min;

@@ -137,16 +137,19 @@ api.sendMessage({
 }, threadID);
 ```
 
-### **Send Message MQTT (Faster)**
-```javascript
-// Same syntax as sendMessage but faster
-api.sendMessageMqtt('Hello via MQTT!', threadID);
-
 api.sendMessageMqtt({
     body: 'Fast message!',
     attachment: fs.createReadStream('./file.pdf')
 }, threadID);
+
+// Replaying to a message via MQTT
+api.sendMessageMqtt('Replying fast!', threadID, messageID);
 ```
+
+> [!TIP]
+> **What is the `event` object?**
+> The `event` (or `message`) object is the data passed to your `api.listen` callback. It contains details like `threadID`, `messageID`, `senderID`, etc.
+> **Example usage:** `api.sendMessageMqtt("Error!", event.threadID, event.messageID);`
 
 ### **Message Management**
 ```javascript
@@ -720,6 +723,22 @@ api.listen((err, event) => {
     }
 });
 ```
+
+---
+
+## 🏗️ The `event` Object Simplified
+When you use `api.listen` or `api.listenMqtt`, the callback provides an `event` object. This is a JSON object containing everything about the incoming activity.
+
+| Property | Description |
+|----------|-------------|
+| `event.type` | Type of event (e.g., `'message'`, `'event'`, `'typ'`) |
+| `event.threadID` | ID of the chat where the message came from |
+| `event.messageID` | Unique ID of the message (useful for replying or unsending) |
+| `event.senderID` | ID of the person who sent the message |
+| `event.body` | The text content of the message |
+
+**Common snippet:**
+`api.sendMessageMqtt("Replied!", event.threadID, event.messageID);`
 
 ---
 

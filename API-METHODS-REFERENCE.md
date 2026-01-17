@@ -10,7 +10,7 @@
 | Method | Description | Example |
 |--------|-------------|---------|
 | `sendMessage()` | Send text/media message | `api.sendMessage('Hello!', threadID)` |
-| `sendMessageMqtt()` | Send message via MQTT (faster) | `api.sendMessageMqtt('Hello!', threadID)` |
+| `sendMessageMqtt()` | Send message via MQTT (faster) | `api.sendMessageMqtt('Hi!', threadID, [replyID])` |
 | `editMessage()` | Edit existing message | `api.editMessage('New text', messageID)` |
 | `unsendMessage()` | Delete/unsend message | `api.unsendMessage(messageID)` |
 | `markAsRead()` | Mark messages as read | `api.markAsRead(threadID)` |

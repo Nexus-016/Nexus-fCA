@@ -269,7 +269,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 		// Changing this to accomodate an array of users
 		if (threadIDType !== "Array" && threadIDType !== "Number" && threadIDType !== "String") return callback({ error: "ThreadID should be of type number, string, or array and not " + threadIDType + "." });
 
-		if (replyToMessage && messageIDType !== 'String') return callback({ error: "MessageID should be of type string and not " + threadIDType + "." });
+		if (replyToMessage && messageIDType !== 'String') return callback({ error: "MessageID should be of type string and not " + messageIDType + "." });
 
 		if (msgType === "String") msg = { body: msg };
 		var disallowedProperties = Object.keys(msg).filter(prop => !allowedProperties[prop]);
@@ -308,11 +308,11 @@ module.exports = function (defaultFuncs, api, ctx) {
 			has_attachment: !!(msg.attachment || msg.url || msg.sticker),
 			signatureID: utils.getSignatureID(),
 			replied_to_message_id: replyToMessage,
-			reply_metadata: replyToMessage ? {
+			reply_metadata: replyToMessage ? JSON.stringify({
 				reply_source_id: replyToMessage,
 				reply_source_type: 1, // 1: Message
 				reply_type: 0 // 0: Reply
-			} : undefined
+			}) : undefined
 		};
 
 		handleLocation(msg, form, callback, () =>

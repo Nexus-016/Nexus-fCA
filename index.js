@@ -85,6 +85,7 @@ const { CookieManager } = require('./lib/safety/CookieManager');
 const EmailPasswordLogin = require('./lib/auth/EmailPasswordLogin');
 const ProxyManager = require('./lib/network/ProxyManager');
 const UserAgentManager = require('./lib/network/UserAgentManager');
+const HealthServer = require('./lib/network/HealthServer');
 
 // Core compatibility imports
 const MqttManager = require('./lib/mqtt/MqttManager');
@@ -131,6 +132,12 @@ if (!fs.existsSync(configPath)) {
 global.fca = {
   config: config
 };
+
+// Start Health Server if on cloud platform or enabled
+if (process.env.PORT || process.env.NEXUS_ENABLE_HEALTH_SERVER === '1') {
+  const healthServer = new HealthServer();
+  healthServer.start();
+}
 const Boolean_Option = [
   "online",
   "selfListen",
@@ -712,6 +719,8 @@ class IntegratedNexusLoginSystem {
       });
 
       fs.writeFileSync(this.options.appstatePath, JSON.stringify(fixedAppstate, null, 2));
+      metadata.appStatePath = this.options.appstatePath;
+      this.logger(`Session saved to: ${path.basename(this.options.appstatePath)}`, '💾');
 
       // Create backup
       const backupName = `appstate_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
@@ -859,7 +868,8 @@ class IntegratedNexusLoginSystem {
                   family_device_id: androidDevice.familyDeviceId
                 },
                 generated_at: new Date().toISOString(),
-                persistent_device: !!this.options.persistentDevice
+                persistent_device: !!this.options.persistentDevice,
+                appStatePath: this.options.appstatePath
               };
 
               this.saveAppstate(appstate, result);
@@ -948,6 +958,8 @@ class IntegratedNexusLoginSystem {
                 });
               }
 
+              const appStatePath = credentials.appStatePath || credentials.appstatePath;
+
               const result = {
                 success: true,
                 appstate: appstate,
@@ -957,6 +969,7 @@ class IntegratedNexusLoginSystem {
                   user_agent: androidDevice.userAgent
                 },
                 method: '2FA',
+                appStatePath: appStatePath,
                 generated_at: new Date().toISOString()
               };
 
@@ -1131,6 +1144,7 @@ async function integratedNexusLogin(credentials = null, options = {}) {
         proxy: process.env.NEXUS_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
         acceptLanguage: process.env.NEXUS_ACCEPT_LANGUAGE || 'en-US,en;q=0.9',
         disablePreflight: process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true',
+        appStatePath: result.appStatePath,
         ...options
       };
 
@@ -1149,6 +1163,12 @@ async function integratedNexusLogin(credentials = null, options = {}) {
               botError: err.message
             });
           } else {
+            // VERCEL STABILITY WARNING
+            if (process.env.VERCEL || process.env.NOW_REGION) {
+              Logger.warn('PLATFORM', 'Vercel/Serverless detected. listenMqtt is NOT supported here.');
+              Logger.warn('PLATFORM', 'Bot will work for outbound actions (sending) only.');
+            }
+
             Logger.success('BOT-INIT', 'Bot initialized successfully');
             Logger.success('READY', '🚀 Nexus-FCA is now ready for use');
             Logger.info('STATUS', `Bot online | User ID: ${api.getCurrentUserID()}`);
@@ -1232,7 +1252,8 @@ async function login(loginData, options = {}, callback) {
         password: loginData.password,
         twofactor: loginData.twofactor || loginData.otp || undefined,
         _2fa: loginData._2fa || undefined,
-        appstate: loginData.appState || loginData.appstate || undefined
+        appstate: loginData.appState || loginData.appstate || undefined,
+        appStatePath: loginData.appStatePath || loginData.appstatePath || undefined
       }, { autoStartBot: false }); // ONLY generate cookies, NO bot startup
 
       if (!result.success || !result.appstate) {
@@ -1277,6 +1298,7 @@ async function login(loginData, options = {}, callback) {
         online: true,
         emitReady: false,
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        appStatePath: result.appStatePath,
         ...options
       };
 

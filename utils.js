@@ -115,6 +115,15 @@ function getHeaders(url, options, ctx, customHeader) {
         headers["sec-fetch-dest"] = "document";
     }
 
+    // Dynamic Referer Pattern
+    if (url.includes('graphql')) {
+        headers.Referer = 'https://www.facebook.com/';
+    } else if (url.includes('messages/')) {
+        headers.Referer = 'https://www.facebook.com/messages/';
+    } else if (url.includes('business')) {
+        headers.Referer = 'https://business.facebook.com/';
+    }
+
     // Dynamic Client Hints - CRITICAL: Must match User-Agent
     if (isChrome && isWindows) {
         headers["sec-ch-ua"] = '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"';
@@ -167,6 +176,7 @@ async function get(url, jar, qs, options, ctx) {
     if (qs) op.searchParams = cleanObject(qs);
 
     return got(url, op).then(function (res) {
+        saveCookies(jar, ctx)(res);
         return res;
     });
 }
@@ -183,6 +193,7 @@ async function get2(url, jar, headers, options, ctx) {
     };
 
     return got(url, op).then(function (res) {
+        saveCookies(jar, ctx)(res);
         return res;
     });
 }
@@ -230,6 +241,7 @@ async function post(url, jar, form, options, ctx, customHeader) {
     }
 
     return got(url, op).then(function (res) {
+        saveCookies(jar, ctx)(res);
         return res;
     });
 }
@@ -256,6 +268,7 @@ async function postFormData(url, jar, form, qs, options, ctx) {
     if (qs) op.searchParams = cleanObject(qs);
 
     return got(url, op).then(function (res) {
+        saveCookies(jar, ctx)(res);
         return res;
     });
 }
@@ -385,6 +398,19 @@ function generatePresence(userID) {
             })
         )
     );
+}
+
+/**
+ * Generate a unique MQTT client ID for each connection
+ * ws3-fca style: Fresh clientID on each reconnect prevents Facebook from
+ * detecting "stale" sessions and force-disconnecting
+ * @returns {string} Unique client identifier
+ */
+function generateClientID() {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substr(2, 9);
+    const counter = (global.__NEXUS_CLIENT_COUNTER__ = (global.__NEXUS_CLIENT_COUNTER__ || 0) + 1);
+    return `mqttwsclient_${timestamp}_${random}_${counter}`;
 }
 
 function getGUID() {
@@ -1311,9 +1337,11 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
         });
     };
 }
-function saveCookies(jar) {
+function saveCookies(jar, ctx) {
     return function (res) {
         var cookies = res.headers["set-cookie"] || [];
+        if (cookies.length === 0) return res;
+
         cookies.forEach(function (c) {
             if (c.indexOf(".facebook.com") > -1 || c.indexOf("facebook.com") > -1) {
                 try {
@@ -1328,8 +1356,48 @@ function saveCookies(jar) {
                 } catch (e) { }
             }
         });
+
+        // AUTO-PERSISTENCE: If ctx has appStatePath, save to disk immediately
+        if (ctx && ctx.appStatePath) {
+            saveAppState(ctx);
+        }
+
         return res;
     };
+}
+
+function saveAppState(ctx) {
+    if (!ctx || !ctx.jar || !ctx.appStatePath) return;
+    try {
+        const appState = getAppState(ctx.jar);
+        const fs = require('fs');
+        const path = require('path');
+
+        // Ensure directory exists
+        const dir = path.dirname(ctx.appStatePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+        fs.writeFileSync(ctx.appStatePath, JSON.stringify(appState, null, 2));
+
+        // Optional: Mirror to environment-ready file for cloud platforms
+        const envPath = ctx.appStatePath.replace('.json', '.env.json');
+        if (process.env.NEXUS_SYNC_ENV_FILE === '1') {
+            fs.writeFileSync(envPath, JSON.stringify(appState));
+        }
+
+        // EXTERNAL PERSISTENCE: If NEXUS_EXTERNAL_SAVE_URL is set, POST there
+        if (process.env.NEXUS_EXTERNAL_SAVE_URL) {
+            const axios = require('axios');
+            axios.post(process.env.NEXUS_EXTERNAL_SAVE_URL, appState, {
+                headers: { 'Content-Type': 'application/json', 'User-Agent': 'Nexus-FCA-Persistence' },
+                timeout: 10000
+            }).catch(err => {
+                log.verbose("utils", "External appstate sync failed: " + err.message);
+            });
+        }
+    } catch (e) {
+        log.verbose("utils", "Auto-save appstate failed: " + e.message);
+    }
 }
 
 var NUM_TO_MONTH = [
@@ -1811,6 +1879,15 @@ module.exports = {
     setData_Path,
     getPaths,
     saveCookies,
+    saveAppState,
+    getAppState,
+    getAppStateB64: function () {
+        if (process.env.NEXUS_APPSTATE_B64) {
+            try { return JSON.parse(Buffer.from(process.env.NEXUS_APPSTATE_B64, 'base64').toString('utf8')); }
+            catch (e) { log.error("utils", "Failed to parse NEXUS_APPSTATE_B64"); return null; }
+        }
+        return null;
+    },
     getType,
     _formatAttachment,
     formatHistoryMessage,
@@ -1827,6 +1904,7 @@ module.exports = {
     formatReadReceipt,
     formatRead,
     generatePresence,
+    generateClientID,
     formatDate,
     decodeClientPayload,
     getAppState,
