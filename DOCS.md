@@ -1,8 +1,25 @@
-# Nexus-FCA Documentation (2025 Edition)
+# Nexus-FCA Documentation (2026 Edition)
 
-> Advanced, safe, high-performance Facebook Messenger automation with integrated secure login, ultra‑low ban rate protections, and modern modular architecture.
+> Ultra-fast, secure, high-performance Facebook Messenger automation with parallel messaging, integrated secure login, and modern modular architecture.
 
 Quick links: [Configuration Reference](./docs/configuration-reference.md) · [Deployment Guide](./docs/deployment-config.md)
+
+---
+## 🆕 Version 3.4.0 – Performance Revolution
+**Key Enhancements**
+- **Parallel Message Sending**: Up to 5 concurrent sends with `setParallelSend(n)`
+- **Fast Send Mode**: Queue bypass with `setFastSend(true)` for instant replies
+- **Smart Concurrency**: Counter-based tracking replaces boolean lock
+- **Configurable Queue**: `enableGroupQueue()` and `setGroupQueueCapacity()` APIs
+- **Balanced Defaults**: 3 parallel sends out of the box (speed + safety)
+
+**Speed Configuration**
+```js
+api.setFastSend(true);     // Max speed, bypass queue
+api.setParallelSend(5);    // 5 concurrent (fast)
+api.setParallelSend(3);    // 3 concurrent (default)
+api.setParallelSend(1);    // Sequential (safest)
+```
 
 ---
 ## 🆕 Version 2.1.0 – Session Stability & Safety Upgrade
@@ -72,6 +89,14 @@ api.listen((err, event) => { /* message / event objects */ });
 ```js
 api.sendMessage('Hi', threadID);
 ```
+### ⚡ Speed Control (NEW in 3.4.0)
+```js
+api.setFastSend(true);       // Bypass queue for instant replies
+api.setParallelSend(5);      // Allow 5 concurrent sends (max)
+api.setParallelSend(3);      // Balanced (default)
+api.enableGroupQueue(false); // Disable queue entirely
+api.setGroupQueueCapacity(200); // Increase queue size
+```
 ### Reactions / Typing
 ```js
 api.setMessageReaction('❤', messageID, threadID, () => {});
@@ -119,11 +144,13 @@ No messages received | Verify MQTT topics, ensure `listen` not replaced by older
 ---
 ## FAQ
 Q: How to speed up without raising risk?  
-A: Tune delay config in safety limiter; keep persistent device enabled; avoid burst sends.  
+A: Use `api.setParallelSend(3)` (default) for balanced speed. For max speed use `api.setFastSend(true)` but with caution.  
+Q: How to get instant replies like fca-unofficial?  
+A: Call `api.setFastSend(true)` after login. This bypasses the queue for immediate sends.  
 Q: Can I rotate devices manually?  
 A: Delete `persistent-device.json` and re-run with `persistentDevice: true` for a new stable profile.  
 Q: Disable safety layer for testing?  
-A: Use `{ disablePreflight: true }` and adjust globalOptions, but not recommended in production.
+A: Use `{ disablePreflight: true }` and `api.setFastSend(true)`, but not recommended in production.
 
 ---
 ## Disclaimer

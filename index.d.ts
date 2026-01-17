@@ -398,6 +398,12 @@ declare module 'nexus-fca' {
         setEditOptions: (opts: EditOptions) => void,
         setBackoffOptions: (opts: { base?: number; max?: number; factor?: number; jitter?: number }) => void,
         enableLazyPreflight: (enable?: boolean) => void,
+        // Message Queue Speed Controls
+        enableGroupQueue: (enable?: boolean) => void,
+        setGroupQueueCapacity: (n: number) => void,
+        setFastSend: (enable?: boolean) => void,
+        setParallelSend: (maxConcurrent?: number) => void,
+        // Health & Diagnostics
         getHealthMetrics: () => any,
         getMemoryMetrics: () => { pendingEdits: number; pendingEditsDropped: number; pendingEditsExpired: number; outboundQueueDepth: number; groupQueueDroppedMessages: number; memoryGuardRuns: number; memoryGuardActions: number } | null,
         setTitle: (newTitle: string, threadID: string, callback?: (err?: Error) => void) => Promise<void>,
