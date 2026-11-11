@@ -16,6 +16,24 @@ var allowedProperties = {
 };
 
 module.exports = function (defaultFuncs, api, ctx) {
+	// Helper function to retry upload with delay
+	async function retryUpload(form, maxRetries = 3, delayMs = 2000) {
+		for (let attempt = 1; attempt <= maxRetries; attempt++) {
+			try {
+				const res = await defaultFuncs
+					.postFormData("https://upload.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {}, {})
+					.then(utils.parseAndCheckLogin(ctx, defaultFuncs));
+				
+				if (res.error) throw res;
+				return res.payload.metadata[0];
+			} catch (err) {
+				if (attempt === maxRetries) throw err;
+				log.warn("uploadAttachment", `Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
+				await new Promise(resolve => setTimeout(resolve, delayMs));
+			}
+		}
+	}
+
 	function uploadAttachment(attachments, callback) {
 		var uploads = [];
 
@@ -27,17 +45,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 				voice_clip: "true"
 			};
 
-			uploads.push(
-				defaultFuncs
-					.postFormData("https://upload.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {}, {})
-					.then(utils.parseAndCheckLogin(ctx, defaultFuncs))
-					.then(function (resData) {
-						if (resData.error) throw resData;
-						// We have to return the data unformatted unless we want to change it
-						// back in sendMessage.
-						return resData.payload.metadata[0];
-					})
-			);
+			uploads.push(retryUpload(form));
 		}
 
 		// resolve all promises
@@ -217,22 +225,34 @@ module.exports = function (defaultFuncs, api, ctx) {
 	}
 
 	function handleMention(msg, form, callback, cb) {
-		if (msg.mentions) {
+		if (Array.isArray(msg.mentions) && msg.mentions.length) {
+			const body = String(msg.body || "");
+			let mentionIndex = 0;
 			for (let i = 0; i < msg.mentions.length; i++) {
 				const mention = msg.mentions[i];
+				if (!mention || typeof mention !== "object") continue;
 				const tag = mention.tag;
-				if (typeof tag !== "string") return callback({ error: "Mention tags must be strings." });
-				const offset = msg.body.indexOf(tag, mention.fromIndex || 0);
-				if (offset < 0) log.warn("handleMention", 'Mention for "' + tag + '" not found in message string.');
-				if (mention.id == null) log.warn("handleMention", "Mention id should be non-null.");
+				if (typeof tag !== "string" || !tag) continue;
+				const id = utils.normalizeMentionID(mention.id);
+				if (!id)
+					continue;
 
-				const id = mention.id || 0;
+				const fromIndex = Number(mention.fromIndex) || 0;
+				let offset = body.indexOf(tag, fromIndex);
+				if (offset < 0)
+					offset = body.toLowerCase().indexOf(tag.toLowerCase(), fromIndex);
+				if (offset < 0) {
+					log.warn("handleMention", 'Mention for "' + tag + '" not found in message string.');
+					continue;
+				}
+
 				const emptyChar = '\u200E';
-				form["body"] = emptyChar + msg.body;
-				form["profile_xmd[" + i + "][offset]"] = offset + 1;
-				form["profile_xmd[" + i + "][length]"] = tag.length;
-				form["profile_xmd[" + i + "][id]"] = id;
-				form["profile_xmd[" + i + "][type]"] = "p";
+				form["body"] = emptyChar + body;
+				form["profile_xmd[" + mentionIndex + "][offset]"] = offset + 1;
+				form["profile_xmd[" + mentionIndex + "][length]"] = tag.length;
+				form["profile_xmd[" + mentionIndex + "][id]"] = id;
+				form["profile_xmd[" + mentionIndex + "][type]"] = "p";
+				mentionIndex++;
 			}
 		}
 		cb();

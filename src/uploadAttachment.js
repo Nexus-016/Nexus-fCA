@@ -2,6 +2,24 @@ const utils = require("../utils");
 const log = require("npmlog");
 
 module.exports = function (defaultFuncs, api, ctx) {
+	// Helper function to retry upload with delay
+	async function retryUpload(form, maxRetries = 3, delayMs = 2000) {
+		for (let attempt = 1; attempt <= maxRetries; attempt++) {
+			try {
+				const res = await defaultFuncs
+					.postFormData("https://upload.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {})
+					.then(utils.parseAndCheckLogin(ctx, defaultFuncs));
+				
+				if (res.error) throw res;
+				return res.payload.metadata[0];
+			} catch (err) {
+				if (attempt === maxRetries) throw err;
+				log.warn("uploadAttachment", `Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
+				await new Promise(resolve => setTimeout(resolve, delayMs));
+			}
+		}
+	}
+
 	function upload(attachments, callback) {
 		callback = callback || function () { };
 		const uploads = [];
@@ -22,25 +40,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 				voice_clip: "true"
 			};
 
-			uploads.push(
-				defaultFuncs
-					.postFormData(
-						"https://upload.facebook.com/ajax/mercury/upload.php",
-						ctx.jar,
-						form,
-						{}
-					)
-					.then(utils.parseAndCheckLogin(ctx, defaultFuncs))
-					.then(function (resData) {
-						if (resData.error) {
-							throw resData;
-						}
-
-						// We have to return the data unformatted unless we want to change it
-						// back in sendMessage.
-						return resData.payload.metadata[0];
-					})
-			);
+			uploads.push(retryUpload(form));
 		}
 
 		// resolve all promises

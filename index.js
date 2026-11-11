@@ -101,14 +101,19 @@ const globalSafety = new FacebookSafety({
   enableLoginValidation: true,
   enableSafeDelays: true, // Human-like delays to reduce detection
   bypassRegionLock: true,
-  ultraLowBanMode: true // FORCED ULTRA-SAFE MODE for maximum protection
+  ultraLowBanMode: false, // Disabled for stability
+  // NEXUS STABILITY: light poke (fb_dtsg refresh) every 4h instead of 30m.
+  // fb_dtsg remains valid for many hours, so 4h keeps it fresh without the
+  // fixed-pattern traffic that pushes accounts into checkpoints.
+  lightPokeIntervalMs: (function () { const n = parseInt(process.env.NEXUS_LIGHT_POKE_INTERVAL, 10); return Number.isFinite(n) && n > 0 ? n : 4 * 60 * 60 * 1000; })()
 });
 
 let checkVerified = null;
 const defaultLogRecordSize = 100;
 log.maxRecordSize = defaultLogRecordSize;
 const defaultConfig = {
-  autoUpdate: true,
+  // Personal use: no auto-update (supply-chain safety + manual control).
+  autoUpdate: false,
   mqtt: {
     enabled: true,
     reconnectInterval: 3600,
@@ -133,8 +138,10 @@ global.fca = {
   config: config
 };
 
-// Start Health Server if on cloud platform or enabled
-if (process.env.PORT || process.env.NEXUS_ENABLE_HEALTH_SERVER === '1') {
+// Start the Nexus health server only when explicitly enabled.
+// Goat-Bot's login.js already owns process.env.PORT for its uptime/health page,
+// so auto-starting this one as well causes EADDRINUSE on 0.0.0.0:8000.
+if (process.env.NEXUS_ENABLE_HEALTH_SERVER === '1') {
   const healthServer = new HealthServer();
   healthServer.start();
 }
@@ -181,7 +188,7 @@ function setOptions(globalOptions, options) {
           case "userAgent": {
             globalOptions.userAgent =
               options.userAgent ||
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
             break;
           }
           case "proxy": {
@@ -238,14 +245,153 @@ function buildAPI(globalOptions, html, jar) {
     throw new Error('Failed to build API: No valid session found.');
   }
 
-  // Wrap API methods with adaptive pacing
+  // Wrap API methods with adaptive pacing + human-like delay (toru-fca best practice)
+  // + light suspension circuit breaker (nkxfca pattern, simplified):
+  // consecutive spam/block/checkpoint/limit failures -> 5min cooldown with slow sends.
+  const breaker = { fails: 0, cooldownUntil: 0 };
+  const BREAKER_PATTERNS = ["spam", "block", "checkpoint", "rate", "limit", "restrict", "suspend", "282", "956"];
   if (!result.api._adaptivePacingWrapped && typeof result.api.sendMessage === 'function') {
     const _origSend = result.api.sendMessage;
-    result.api.sendMessage = async function (message, threadID, callback) {
+    // NEXUS PRODUCTION FIX: the group-queue wrapper resolves results through
+    // its CALLBACK (its own return value is undefined), so `await _origSend()`
+    // never observed errors and the circuit breaker counted nothing for
+    // queued sends — i.e. almost every message. Intersect the callback as
+    // well, without changing the promise/callback contract callers rely on.
+    const noteBreakerError = (err) => {
+      try {
+        const msg = JSON.stringify(err && (err.message || err.error) ? (err.message || err.error) : err).toLowerCase();
+        if (BREAKER_PATTERNS.some(p => msg.includes(p))) {
+          breaker.fails++;
+          if (breaker.fails >= 5 && Date.now() >= breaker.cooldownUntil) {
+            breaker.cooldownUntil = Date.now() + (5 * 60 * 1000);
+            logger("Circuit breaker TRIPPED: 5 consecutive restriction signals - 5min cooldown", "error");
+          }
+        } else {
+          breaker.fails = 0;
+        }
+      } catch (_) { }
+    };
+    result.api.sendMessage = async function (message, threadID, callback, replyToMessage, isGroup) {
       try { if (globalSafety && typeof globalSafety.applyAdaptiveSendDelay === 'function') await globalSafety.applyAdaptiveSendDelay(); } catch (_) { }
-      return _origSend(message, threadID, callback);
+      // Human-like delay 50-200ms so FB can't fingerprint bot traffic pattern
+      try {
+        if (globalOptions.facebookProtection !== false && globalOptions.humanLikeDelay !== false) {
+          const delay = 50 + Math.floor(Math.random() * 150);
+          await new Promise(r => setTimeout(r, delay));
+        }
+      } catch (_) { }
+      // Circuit breaker: in cooldown -> slow down sends instead of hammering a flagged account
+      if (Date.now() < breaker.cooldownUntil) {
+        logger("Circuit breaker active: slowing sends for flagged account", "warn");
+        await new Promise(r => setTimeout(r, 30000));
+      }
+      const wrappedCallback = typeof callback === 'function'
+        ? function (err, res) {
+            if (err) noteBreakerError(err); else breaker.fails = 0;
+            try { callback(err, res); } catch (_) { }
+          }
+        : function (err) { if (err) noteBreakerError(err); else breaker.fails = 0; };
+      try {
+        const res = await _origSend(message, threadID, wrappedCallback, replyToMessage, isGroup);
+        return res;
+      } catch (err) {
+        noteBreakerError(err);
+        throw err;
+      }
     };
     result.api._adaptivePacingWrapped = true;
+  }
+
+  // Anti-logout guard (toru-fca best practice): block accidental api.logout() from cookie session
+  // Browser stays logged in. Use api.forceLogout() only when you really want to logout.
+  if (!result.api._antiLogoutWrapped) {
+    const _origLogout = result.api.logout;
+    let antiLogoutEnabled = globalOptions.antiLogout !== false;
+    result.api.stopAntiLogout = function () {
+      antiLogoutEnabled = false;
+      logger("Anti-logout disabled", "warn");
+    };
+    result.api.forceLogout = function (...args) {
+      logger("Force logout requested (anti-logout bypassed)", "warn");
+      if (typeof _origLogout === 'function') return _origLogout.apply(this, args);
+    };
+    if (typeof _origLogout === 'function') {
+      result.api.logout = function (...args) {
+        if (antiLogoutEnabled) {
+          logger("Anti-logout: blocked logout() to protect browser session. Use forceLogout() if really needed.", "warn");
+          const cb = args.find(a => typeof a === 'function');
+          if (cb) cb(null, { blocked: true, reason: "anti-logout guard" });
+          return Promise.resolve({ blocked: true });
+        }
+        return _origLogout.apply(this, args);
+      };
+    }
+    result.api._antiLogoutWrapped = true;
+  }
+
+  // Session guard: auto-save appstate every 3 min (toru-fca best practice for 24h uptime)
+  if (!result.api._sessionGuardStarted && globalOptions.sessionGuard !== false) {
+    result.api._sessionGuardStarted = true;
+    const guardPath = globalOptions.appStatePath || global.client?.dirAccount || null;
+    result.api.sessionGuard = function (savePath, opts = {}) {
+      const targetPath = savePath || guardPath;
+      if (!targetPath) {
+        logger("sessionGuard: no path provided, skipping auto-save", "warn");
+        return () => {};
+      }
+      const intervalMs = opts.intervalMs || 180000; // 3 min
+      let lastSavedJson = null;
+      const timer = setInterval(() => {
+        try {
+          const appState = result.api.getAppState ? result.api.getAppState() : null;
+          if (appState && appState.length) {
+            const json = JSON.stringify(appState, null, 2);
+            // Skip unchanged writes: constant rewrites served nothing, churned
+            // disk, and could trip file-watchers that react to mtime changes.
+            if (json !== lastSavedJson) {
+              lastSavedJson = json;
+              require("fs").writeFileSync(targetPath, json);
+            }
+          }
+        } catch (e) {
+          logger("sessionGuard auto-save failed: " + e.message, "warn");
+        }
+      }, intervalMs);
+      if (timer.unref) timer.unref();
+      logger(`Session guard started (auto-save every ${Math.round(intervalMs / 1000)}s)`, "info");
+      return () => clearInterval(timer);
+    };
+    result.api.saveSession = function (savePath) {
+      const targetPath = savePath || guardPath;
+      if (!targetPath) throw new Error("saveSession: no path provided");
+      const appState = result.api.getAppState();
+      require("fs").writeFileSync(targetPath, JSON.stringify(appState, null, 2));
+      return true;
+    };
+    // Auto-start if we know the path (GoatBot passes appState, path comes from global.client)
+    try {
+      if (guardPath) result.api.sessionGuard(guardPath);
+    } catch (_) { }
+  }
+
+  // Health snapshot (toru-fca getHealth + Nexus metrics merged)
+  if (!result.api.getHealth) {
+    result.api.getHealth = function () {
+      return {
+        status: ctx_status(),
+        userID: result.ctx?.userID || result.api.getCurrentUserID?.() || null,
+        mqttConnected: !!result.ctx?.mqttClient,
+        lastSeqId: result.ctx?.lastSeqId || null,
+        uptimeSec: Math.floor(process.uptime()),
+        metrics: result.api.getHealthMetrics ? result.api.getHealthMetrics() : null
+      };
+      function ctx_status() {
+        try {
+          if (result.ctx?.loggedIn === false) return "logged_out";
+          return "ok";
+        } catch (_) { return "ok"; }
+      }
+    };
   }
 
   // Safety wrapper: ensure every inbound MQTT event updates safety lastEvent timestamp
@@ -269,17 +415,27 @@ function buildAPI(globalOptions, html, jar) {
     result.api._safetyWrappedListen = true;
   }
 
-  // Auto-refresh fb_dtsg every 24 hours
-  setInterval(async () => {
-    result.api
-      .refreshFb_dtsg()
-      .then(() => {
+  // Auto-refresh fb_dtsg on RANDOMIZED intervals (nkxfca TokenRefreshManager pattern):
+  // fixed 20min was a robot pattern -> now 15-25min random each cycle.
+  // Override: globalOptions.fbDtsgRefreshMs (fixed) or fbDtsgRefreshJitter:false (fixed 20min).
+  const fbBaseMs = globalOptions.fbDtsgRefreshMs || (20 * 60 * 1000);
+  const fbJitterOn = globalOptions.fbDtsgRefreshJitter !== false && !globalOptions.fbDtsgRefreshMs;
+  const scheduleFbRefresh = () => {
+    const waitMs = fbJitterOn
+      ? (15 * 60 * 1000) + Math.floor(Math.random() * (10 * 60 * 1000))
+      : fbBaseMs;
+    const fbTimer = setTimeout(async () => {
+      try {
+        await result.api.refreshFb_dtsg();
         logger("Successfully refreshed fb_dtsg", 'info');
-      })
-      .catch((err) => {
-        console.error("An error occurred while refreshing fb_dtsg", err);
-      });
-  }, 1000 * 60 * 60 * 24);
+      } catch (err) {
+        console.error("An error occurred while refreshing fb_dtsg", err?.message || err);
+      }
+      scheduleFbRefresh();
+    }, waitMs);
+    if (fbTimer.unref) fbTimer.unref();
+  };
+  scheduleFbRefresh();
 
   return result;
 }
@@ -420,8 +576,13 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
           return Number.isFinite(n) && n > 0 ? n : def;
         };
 
+        // NEXUS STABILITY: default cookie refresh interval raised from 30min to 6h.
+        // Facebook cookies (c_user/xs/fr) stay valid for weeks — refreshing them
+        // every 30min just added ~50 fixed-pattern page visits per day from a
+        // datacenter IP, which is a classic checkpoint trigger. 6h keeps the
+        // session warm (no cookie death) while removing the robotic pattern.
         const refreshEnabled = process.env.NEXUS_COOKIE_REFRESH_ENABLED ? envBool(process.env.NEXUS_COOKIE_REFRESH_ENABLED) : true;
-        const refreshInterval = toInt(process.env.NEXUS_COOKIE_REFRESH_INTERVAL, 30 * 60 * 1000);
+        const refreshInterval = toInt(process.env.NEXUS_COOKIE_REFRESH_INTERVAL, 6 * 60 * 60 * 1000);
         const expiryDays = toInt(process.env.NEXUS_COOKIE_EXPIRY_DAYS, 90);
         const maxBackups = toInt(process.env.NEXUS_COOKIE_MAX_BACKUPS, 5);
         const backupsEnabled = process.env.NEXUS_COOKIE_BACKUP_ENABLED ? envBool(process.env.NEXUS_COOKIE_BACKUP_ENABLED) : true;
@@ -435,8 +596,11 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
           maxBackups: maxBackups
         });
 
-        // Get appstate path from options or ctx
-        const appstatePath = globalOptions.appstatePath || process.env.NEXUS_APPSTATE_PATH || (ctx.dataDir ? path.join(ctx.dataDir, 'appstate.json') : null);
+        // Get appstate path from options or ctx. Fall back to the bot's known
+        // account file (Goat-Bot sets global.client.dirAccount) so the
+        // CookieRefresher actually runs inside the bot instead of silently
+        // never starting.
+        const appstatePath = globalOptions.appstatePath || process.env.NEXUS_APPSTATE_PATH || (global.client && global.client.dirAccount) || (ctx.dataDir ? path.join(ctx.dataDir, 'appstate.json') : null);
         const backupPath = process.env.NEXUS_COOKIE_BACKUP_PATH || globalOptions.backupPath || (ctx.dataDir ? path.join(ctx.dataDir, 'backups') : null);
 
         if (appstatePath) {
@@ -444,10 +608,13 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
           global.__NEXUS_COOKIE_REFRESHER__ = cookieRefresher; // Make accessible to MQTT for proactive refresh
           logger('✅ Cookie Refresher initialized - cookies will be kept fresh', 'info');
 
-          // Immediate first refresh to ensure long expiry
-          cookieRefresher.refreshNow().catch(err => {
-            logger(`❌ Initial cookie refresh failed: ${err.message}`, 'warn');
-          });
+          // NEXUS STABILITY: don't hit Facebook seconds after login — the login
+          // GET itself is fresh traffic. First refresh lands 2-4 min later.
+          setTimeout(() => {
+            cookieRefresher.refreshNow().catch(err => {
+              logger(`❌ Initial cookie refresh failed: ${err.message}`, 'warn');
+            });
+          }, 2 * 60 * 1000 + Math.floor(Math.random() * 2 * 60 * 1000));
         }
       } catch (err) {
         logger(`❌ Cookie Refresher initialization failed: ${err.message}`, 'error');

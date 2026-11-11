@@ -9,6 +9,7 @@ const FormData = require("form-data");
 const { HttpProxyAgent } = require("http-proxy-agent");
 const { HttpsProxyAgent } = require("https-proxy-agent");
 const { SocksProxyAgent } = require("socks-proxy-agent");
+const { randomUserAgent } = require("./user-agents");
 
 let globalProxy;
 
@@ -86,58 +87,146 @@ function getJar() {
     return jar;
 }
 
-function getHeaders(url, options, ctx, customHeader) {
-    const ua = (options?.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
-    const isWindows = ua.includes("Windows NT");
-    const isAndroid = ua.includes("Android");
-    const isChrome = ua.includes("Chrome") && !ua.includes("Edg");
+// Sanitize header value to remove invalid characters
+function sanitizeHeaderValue(value) {
+    if (value === null || value === undefined) return "";
+    let str = String(value);
+    if (str.trim().startsWith("[") && str.trim().endsWith("]")) {
+        try {
+            const parsed = JSON.parse(str);
+            if (Array.isArray(parsed)) return "";
+        } catch { }
+    }
+    return str.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F\r\n\[\]]/g, "").trim();
+}
 
-    var headers = {
-        Referer: "https://www.facebook.com/",
-        Host: url.replace("https://", "").split("/")[0],
-        Origin: "https://www.facebook.com",
-        "user-agent": ua,
-        Connection: "keep-alive",
-        "accept": "*/*",
-        "accept-language": "en-US,en;q=0.9",
-        "dnt": "1",
-        "upgrade-insecure-requests": "1"
+function sanitizeHeaderName(name) {
+    if (!name || typeof name !== "string") return "";
+    return name.replace(/[^\x21-\x7E]/g, "").trim();
+}
+
+// Build stable Client Hints for a fixed User-Agent string
+// (used by fingerprint lock + ws3-compat randomUserAgent:false mode)
+function hintsForUA(userAgent) {
+    const m = String(userAgent).match(/Chrome\/(\d+)/);
+    const major = m ? m[1] : "141";
+    const isMac = /Macintosh/.test(String(userAgent));
+    const isLinux = /Linux/.test(String(userAgent));
+    const brands = [
+        `"Not(A:Brand";v="99"`,
+        `"Chromium";v="${major}"`,
+        `"Google Chrome";v="${major}"`
+    ];
+    const platform = isMac ? "macOS" : isLinux ? "Linux" : "Windows";
+    return {
+        userAgent: String(userAgent),
+        secChUa: brands.join(', '),
+        secChUaFullVersionList: brands.map((b) => b.replace(/"$/, `.0.0.0"`)).join(', '),
+        secChUaPlatform: `"${platform}"`,
+        // Chrome on Linux reports an empty platform version; desktop Win/mac report the OS build.
+        secChUaPlatformVersion: isLinux ? '""' : '"19.0.0"'
+    };
+}
+
+function getHeaders(url, options, ctx, customHeader) {
+    // FINGERPRINT LOCK (ws3-fca/nkxfca best practice):
+    // A real browser NEVER changes its User-Agent per request. Old code called
+    // randomUserAgent() on EVERY request -> rotating fingerprint = bot signal.
+    // Now: one UA + Client Hints locked per session (ctx._fpLocked).
+    // Opt-outs: fingerprintLock:false (rotate like before),
+    //           or ws3-compat randomUserAgent:false + userAgent string (fixed UA).
+    let fp = null;
+    const gOpts = (ctx && ctx.globalOptions) || {};
+    if (ctx && ctx._fpLocked) {
+        fp = ctx._fpLocked;
+    } else {
+        // Fixed UA wins when: explicitly opted in (randomUserAgent:false),
+        // a per-call userAgent was given, OR a session-wide userAgent exists
+        // (Goat-Bot / index.js always resolve one). Rotation only happens when
+        // randomUserAgent is explicitly true.
+        const fixedUA = (options && options.userAgent) || gOpts.userAgent;
+        const wantFixed = Boolean(fixedUA) && gOpts.randomUserAgent !== true;
+        if (wantFixed && fixedUA) {
+            fp = hintsForUA(fixedUA);
+        } else {
+            fp = randomUserAgent();
+        }
+        if (ctx && gOpts.fingerprintLock !== false) {
+            ctx._fpLocked = fp;
+        }
+    }
+    const {
+        userAgent,
+        secChUa,
+        secChUaFullVersionList,
+        secChUaPlatform,
+        secChUaPlatformVersion
+    } = fp;
+
+    const host = new URL(url).hostname;
+    const referer = `https://${host}/`;
+
+    // 2. Build Base Headers
+    const headers = {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'max-age=0',
+        'Connection': 'keep-alive',
+        'Dpr': '1',
+        'Host': host,
+        'Origin': `https://${host}`,
+        'Referer': referer,
+        'Sec-Ch-Prefers-Color-Scheme': 'light',
+        'Sec-Ch-Ua': secChUa,
+        'Sec-Ch-Ua-Full-Version-List': secChUaFullVersionList,
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Model': '""',
+        'Sec-Ch-Ua-Platform': secChUaPlatform,
+        'Sec-Ch-Ua-Platform-Version': secChUaPlatformVersion,
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+        'User-Agent': userAgent,
+        'Viewport-Width': '1920'
     };
 
-    // Human-like Fetch headers
-    if (url.includes("/api/graphql/") || url.includes("/messaging/")) {
-        headers["sec-fetch-site"] = 'same-origin';
-        headers["sec-fetch-mode"] = 'cors';
-        headers["sec-fetch-dest"] = "empty";
-    } else {
-        headers["sec-fetch-site"] = 'none';
-        headers["sec-fetch-mode"] = 'navigate';
-        headers["sec-fetch-dest"] = "document";
+    // 3. Inject Contextual Headers (LSD, Region, Spin)
+    if (ctx) {
+        if (ctx.fb_dtsg) {
+            headers['X-Fb-Lsd'] = ctx.lsd;
+        }
+        if (ctx.region) {
+            headers['X-MSGR-Region'] = ctx.region;
+        }
+        if (ctx.master) {
+            const { __spin_r, __spin_b, __spin_t } = ctx.master;
+            if (__spin_r) headers['X-Fb-Spin-R'] = String(__spin_r);
+            if (__spin_b) headers['X-Fb-Spin-B'] = String(__spin_b);
+            if (__spin_t) headers['X-Fb-Spin-T'] = String(__spin_t);
+        }
+    }
+    
+    // 4. Merge Custom Headers
+    if (customHeader) {
+        Object.assign(headers, customHeader);
+        if (customHeader.noRef) {
+            delete headers.Referer;
+        }
     }
 
-    // Dynamic Referer Pattern
-    if (url.includes('graphql')) {
-        headers.Referer = 'https://www.facebook.com/';
-    } else if (url.includes('messages/')) {
-        headers.Referer = 'https://www.facebook.com/messages/';
-    } else if (url.includes('business')) {
-        headers.Referer = 'https://business.facebook.com/';
+    // 5. Final Sanitization Pass (from fca-unofficial)
+    const sanitizedHeaders = {};
+    for (const [key, value] of Object.entries(headers)) {
+        const sanitizedKey = sanitizeHeaderName(key);
+        const sanitizedValue = sanitizeHeaderValue(value);
+        if (sanitizedKey && sanitizedValue !== "") {
+            sanitizedHeaders[sanitizedKey] = sanitizedValue;
+        }
     }
 
-    // Dynamic Client Hints - CRITICAL: Must match User-Agent
-    if (isChrome && isWindows) {
-        headers["sec-ch-ua"] = '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"';
-        headers["sec-ch-ua-mobile"] = "?0";
-        headers["sec-ch-ua-platform"] = '"Windows"';
-    } else if (isAndroid) {
-        headers["sec-ch-ua-mobile"] = "?1";
-        // Remove Windows-specific headers for Android UAs
-    }
-
-    if (customHeader) Object.assign(headers, customHeader);
-    if (ctx && ctx.region) headers["X-MSGR-Region"] = ctx.region;
-
-    return headers;
+    return sanitizedHeaders;
 }
 
 function isReadableStream(obj) {
@@ -166,7 +255,7 @@ async function get(url, jar, qs, options, ctx) {
             if (qs.hasOwnProperty(prop) && getType(qs[prop]) === "Object") qs[prop] = JSON.stringify(qs[prop]);
     var op = {
         headers: getHeaders(url, options, ctx),
-        timeout: 60000,
+        timeout: { request: 60000 },
         method: "GET",
         cookieJar: jar,
         throwHttpErrors: false,
@@ -184,7 +273,7 @@ async function get(url, jar, qs, options, ctx) {
 async function get2(url, jar, headers, options, ctx) {
     var op = {
         headers: getHeaders(url, options, ctx, headers),
-        timeout: 60000,
+        timeout: { request: 60000 },
         method: "GET",
         cookieJar: jar,
         throwHttpErrors: false,
@@ -202,7 +291,7 @@ async function post(url, jar, form, options, ctx, customHeader) {
     var headers = getHeaders(url, options, ctx, customHeader);
     var op = {
         headers: headers,
-        timeout: 60000,
+        timeout: { request: 60000 },
         method: "POST",
         cookieJar: jar,
         throwHttpErrors: false,
@@ -257,19 +346,38 @@ async function postFormData(url, jar, form, qs, options, ctx) {
 
     var op = {
         headers: headers,
-        timeout: 60000,
+        timeout: {
+            request: 120000,  // 2 minutes for file uploads
+            response: 60000
+        },
         method: "POST",
         body: body,
         cookieJar: jar,
         throwHttpErrors: false,
         decompress: true,
-        agent: getAgent(url)
+        agent: getAgent(url),
+        retry: {
+            limit: 3,
+            methods: ['POST'],
+            statusCodes: [408, 413, 429, 500, 502, 503, 504]
+        }
     };
     if (qs) op.searchParams = cleanObject(qs);
 
     return got(url, op).then(function (res) {
         saveCookies(jar, ctx)(res);
         return res;
+    }).catch(function (err) {
+        // Retry with longer timeout on stream errors
+        if (err.code === 'ERR_GOT_REQUEST_ERROR' || err.message?.includes('stream')) {
+            log.warn("postFormData", "Retrying upload with extended timeout...");
+            op.timeout = { request: 180000, response: 120000 };
+            return got(url, op).then(function (res) {
+                saveCookies(jar, ctx)(res);
+                return res;
+            });
+        }
+        throw err;
     });
 }
 
@@ -751,37 +859,37 @@ function _formatAttachment(attachment1, attachment2) {
             return {
                 type: "share",
                 ID: blob.legacy_attachment_id,
-                url: blob.story_attachment.url,
+                url: blob.story_attachment ? blob.story_attachment.url : null,
 
-                title: blob.story_attachment.title_with_entities.text,
-                description: blob.story_attachment.description &&
+                title: blob.story_attachment && blob.story_attachment.title_with_entities ? blob.story_attachment.title_with_entities.text : null,
+                description: blob.story_attachment && blob.story_attachment.description &&
                     blob.story_attachment.description.text,
-                source: blob.story_attachment.source ? blob.story_attachment.source.text : null,
+                source: blob.story_attachment && blob.story_attachment.source ? blob.story_attachment.source.text : null,
 
-                image: blob.story_attachment.media &&
+                image: blob.story_attachment && blob.story_attachment.media &&
                     blob.story_attachment.media.image &&
                     blob.story_attachment.media.image.uri,
-                width: blob.story_attachment.media &&
+                width: blob.story_attachment && blob.story_attachment.media &&
                     blob.story_attachment.media.image &&
                     blob.story_attachment.media.image.width,
-                height: blob.story_attachment.media &&
+                height: blob.story_attachment && blob.story_attachment.media &&
                     blob.story_attachment.media.image &&
                     blob.story_attachment.media.image.height,
-                playable: blob.story_attachment.media &&
+                playable: blob.story_attachment && blob.story_attachment.media &&
                     blob.story_attachment.media.is_playable,
-                duration: blob.story_attachment.media &&
+                duration: blob.story_attachment && blob.story_attachment.media &&
                     blob.story_attachment.media.playable_duration_in_ms,
-                playableUrl: blob.story_attachment.media == null ? null : blob.story_attachment.media.playable_url,
+                playableUrl: blob.story_attachment && blob.story_attachment.media == null ? null : blob.story_attachment.media.playable_url,
 
-                subattachments: blob.story_attachment.subattachments,
-                properties: blob.story_attachment.properties.reduce(function (/** @type {{ [x: string]: any; }} */obj, /** @type {{ key: string | number; value: { text: any; }; }} */cur) {
+                subattachments: blob.story_attachment ? blob.story_attachment.subattachments : null,
+                properties: blob.story_attachment && blob.story_attachment.properties ? blob.story_attachment.properties.reduce(function (/** @type {{ [x: string]: any; }} */obj, /** @type {{ key: string | number; value: { text: any; }; }} */cur) {
                     obj[cur.key] = cur.value.text;
                     return obj;
-                }, {}),
+                }, {}) : null,
 
-                facebookUrl: blob.story_attachment.url, // @Legacy
-                target: blob.story_attachment.target, // @Legacy
-                styleList: blob.story_attachment.style_list // @Legacy
+                facebookUrl: blob.story_attachment ? blob.story_attachment.url : null, // @Legacy
+                target: blob.story_attachment ? blob.story_attachment.target : null, // @Legacy
+                styleList: blob.story_attachment ? blob.story_attachment.style_list : null // @Legacy
             };
         case "MessageFile":
             return {
@@ -824,31 +932,202 @@ function formatAttachment(attachments, attachmentIds, attachmentMap, shareMap) {
         }) : [];
 }
 
-function formatDeltaMessage(m) {
-    var md = m.messageMetadata;
-    var mdata =
-        m.data === undefined ? [] :
-            m.data.prng === undefined ? [] :
-                JSON.parse(m.data.prng);
-    var m_id = mdata.map((/** @type {{ i: any; }} */u) => u.i);
-    var m_offset = mdata.map((/** @type {{ o: any; }} */u) => u.o);
-    var m_length = mdata.map((/** @type {{ l: any; }} */u) => u.l);
+/**
+ * Facebook sends mention metadata in several different shapes depending on
+ * the transport:
+ *   - MQTT:        data.prng = '[{"i":"123","o":0,"l":5}]'
+ *   - GraphQL:     ranges = [{ entity: { id: "123" }, offset: 0, length: 5 }]
+ *   - some forks:  mentions = [{ userId: "123", offset: 0, length: 5 }]
+ * A strict JSON.parse used to throw for the non-MQTT shapes, which
+ * propagated out of formatDeltaMessage and silently dropped the whole
+ * incoming message.  Always normalise instead of throwing.
+ */
+function isMentionRow(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return false;
+    return value.i !== undefined || value.id !== undefined || value.uid !== undefined ||
+        value.userID !== undefined || value.userId !== undefined || value.senderID !== undefined ||
+        value.entity !== undefined || value.offset !== undefined || value.o !== undefined ||
+        value.fromIndex !== undefined || value.tag !== undefined || value.name !== undefined;
+}
+
+function collectMentionRows(value, rows, depth) {
+    if (value === undefined || value === null || depth > 5)
+        return;
+    if (typeof value === "string") {
+        var text = value.trim();
+        if (!text || text.length > 200000)
+            return;
+        if (text[0] === "[" || text[0] === "{" || text[0] === '"') {
+            try {
+                collectMentionRows(JSON.parse(text), rows, depth + 1);
+            } catch (_) { }
+        }
+        return;
+    }
+    if (Array.isArray(value)) {
+        for (var i = 0; i < value.length; i++)
+            collectMentionRows(value[i], rows, depth + 1);
+        return;
+    }
+    if (typeof value !== "object")
+        return;
+
+    // Containers produced by different FCA versions. Do not return early:
+    // a payload can expose the same mentions in more than one place, and
+    // missing one of them would leave a tag untranslated.
+    if (Array.isArray(value.ranges)) {
+        collectMentionRows(value.ranges, rows, depth + 1);
+    }
+    if (value.prng !== undefined && value.prng !== value) {
+        collectMentionRows(value.prng, rows, depth + 1);
+    }
+    if (value.data !== undefined && value.data !== value) {
+        collectMentionRows(value.data, rows, depth + 1);
+    }
+    if (value.mentions !== undefined && value.mentions !== value) {
+        collectMentionRows(value.mentions, rows, depth + 1);
+    }
+    if (isMentionRow(value)) {
+        rows.push(value);
+        return;
+    }
+
+    // Plain map shape: { "123456789": "Name" }
+    var keys = Object.keys(value);
+    if (keys.length) {
+        var numericKeys = 0;
+        for (var k = 0; k < keys.length; k++) {
+            if (/^[0-9]{5,}$/.test(normalizeMentionID(keys[k]) || ""))
+                numericKeys++;
+        }
+        if (numericKeys === keys.length) {
+            for (var n = 0; n < keys.length; n++)
+                rows.push({ id: keys[n], name: value[keys[n]] });
+        }
+    }
+}
+
+function parseMentionData(data) {
+    var rows = [];
+    try {
+        collectMentionRows(data, rows, 0);
+    } catch (_) { }
+    return rows;
+}
+
+function normalizeMentionID(id) {
+    if (id === undefined || id === null) return null;
+    if (typeof id === "object") {
+        return normalizeMentionID(
+            id.id !== undefined ? id.id :
+                id.userID !== undefined ? id.userID :
+                    id.userId !== undefined ? id.userId :
+                        id.uid !== undefined ? id.uid :
+                            id.senderID !== undefined ? id.senderID :
+                                id.fbid !== undefined ? id.fbid :
+                                    id.entity !== undefined ? id.entity :
+                                        id.entityId !== undefined ? id.entityId : undefined
+        );
+    }
+    var value = String(id).trim();
+    if (!value) return null;
+    value = value.replace(/^(?:fbid|uid|user|facebook|id)[:.]/i, "").replace(/^@+/, "").trim();
+    // E2EE JIDs look like "61568577897207:69@msgr".
+    var jid = value.match(/^([0-9]{5,}):[^@]*@/);
+    if (jid) value = jid[1];
+    return value || null;
+}
+
+function firstMentionValue(row, keys) {
+    for (var i = 0; i < keys.length; i++) {
+        var value = row[keys[i]];
+        if (value !== undefined && value !== null && value !== "")
+            return value;
+    }
+    return undefined;
+}
+
+/**
+ * Build the `mentions` map used by all commands.  Keys are always clean,
+ * prefix-free user IDs.  Values are the exact substring from the body so
+ * outgoing tags (tag + offset) match what the user typed.
+ *
+ * `extra` lets callers add another payload (for example `m.mentions` next to
+ * `m.data.prng`) without calling this function twice.
+ */
+function formatMentions(data, body, extra) {
+    var text = typeof body === "string" ? body : "";
+    var sources = [data, extra];
+    var rows = parseMentionData(sources);
     var mentions = {};
-    var body = m.body || "";
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        if (!row || typeof row !== "object") continue;
+
+        var entity = row.entity;
+        if (entity !== null && typeof entity === "object") {
+            var entityID = firstMentionValue(entity, ["id", "userID", "userId", "uid", "senderID", "fbid"]);
+            if (entityID !== undefined && row.id === undefined && row.i === undefined && row.uid === undefined)
+                row = Object.assign({}, row, { id: entityID, name: row.name || entity.name });
+        }
+        else if (entity !== undefined && entity !== null && typeof entity !== "object" &&
+            row.id === undefined && row.i === undefined && row.uid === undefined) {
+            row = Object.assign({}, row, { id: entity });
+        }
+
+        var id = normalizeMentionID(firstMentionValue(row, [
+            "i", "id", "uid", "userID", "userId", "senderID", "fbid"
+        ]));
+        if (!id || id === "0") continue;
+
+        var offset = Number(firstMentionValue(row, ["o", "offset", "fromIndex", "start", "position"]));
+        var length = Number(firstMentionValue(row, ["l", "length", "len", "size"]));
+        var tag = "";
+        if (Number.isFinite(offset) && offset >= 0) {
+            if (Number.isFinite(length) && length > 0)
+                tag = text.substr(offset, length);
+            else {
+                var fallbackTag = firstMentionValue(row, ["tag", "n", "name", "text", "displayName"]);
+                if (typeof fallbackTag === "string" && fallbackTag)
+                    tag = text.substr(offset, fallbackTag.length);
+            }
+        }
+        if (!tag && typeof row.n === "string") tag = row.n;
+        if (!tag && typeof row.tag === "string") tag = row.tag;
+        if (!tag && typeof row.name === "string") tag = row.name;
+        if (!tag && typeof row.text === "string") tag = row.text;
+        if (!tag && typeof row.displayName === "string") tag = row.displayName;
+        if (!tag && entity && typeof entity === "object" && typeof entity.name === "string") tag = entity.name;
+        if (!tag) tag = "@" + id;
+        mentions[id] = tag;
+    }
+    return mentions;
+}
+
+function formatDeltaMessage(m) {
+    var md = m.messageMetadata || {};
+    var threadKey = md.threadKey || {};
+    var body = typeof m.body === "string" ? m.body : "";
     var args = body == "" ? [] : body.trim().split(/\s+/);
-    for (var i = 0; i < m_id.length; i++) mentions[m_id[i]] = m.body.substring(m_offset[i], m_offset[i] + m_length[i]);
     return {
         type: "message",
-        senderID: formatID(md.actorFbId.toString()),
-        threadID: formatID((md.threadKey.threadFbId || md.threadKey.otherUserFbId).toString()),
+        senderID: md.actorFbId != null ? formatID(md.actorFbId.toString()) : "",
+        threadID: formatID(String(threadKey.threadFbId || threadKey.otherUserFbId || "")),
         messageID: md.messageId,
         args: args,
         body: body,
-        attachments: (m.attachments || []).map((/** @type {any} */v) => _formatAttachment(v)),
-        mentions: mentions,
+        attachments: (Array.isArray(m.attachments) ? m.attachments : []).map((/** @type {any} */v) => {
+            try {
+                return _formatAttachment(v);
+            } catch (error) {
+                return Object.assign({}, v, { type: "unknown", error: error });
+            }
+        }),
+        mentions: formatMentions(m.data, body, m.mentions),
         timestamp: md.timestamp,
-        isGroup: !!md.threadKey.threadFbId,
-        participantIDs: m.participants || []
+        isGroup: !!threadKey.threadFbId,
+        participantIDs: Array.isArray(m.participants) ? m.participants : []
     };
 }
 
@@ -1036,13 +1315,12 @@ function formatRead(event) {
     };
 }
 
-function getFrom(str, startToken, endToken) {
-    var start = str.indexOf(startToken) + startToken.length;
-    if (start < startToken.length) return "";
-    var lastHalf = str.substring(start);
-    var end = lastHalf.indexOf(endToken);
-    if (end === -1) throw Error("Could not find endTime `" + endToken + "` in the given string.");
-    return lastHalf.substring(0, end);
+function getFrom(html, a, b) {
+    const i = html.indexOf(a);
+    if (i < 0) return;
+    const start = i + a.length;
+    const j = html.indexOf(b, start);
+    return j < 0 ? undefined : html.slice(start, j);
 }
 
 function getFroms(str, startToken, endToken) {
@@ -1528,7 +1806,18 @@ function decodeClientPayload(payload) {
 }
 
 function getAppState(jar) {
-    return jar.getCookies("https://www.facebook.com").concat(jar.getCookies("https://facebook.com")).concat(jar.getCookies("https://www.messenger.com"));
+    const all = jar.getCookies("https://www.facebook.com")
+        .concat(jar.getCookies("https://facebook.com"))
+        .concat(jar.getCookies("https://www.messenger.com"));
+    // Dedupe: cookies with domain=.facebook.com show up under both the www and
+    // apex URL lookups. Duplicate entries made the saved appstate messy.
+    const seen = new Set();
+    return all.filter(c => {
+        const sig = `${c.key}|${c.domain}|${c.path}|${c.value}`;
+        if (seen.has(sig)) return false;
+        seen.add(sig);
+        return true;
+    });
 }
 
 function getData_Path(Obj, Arr, Stt) {
@@ -1630,6 +1919,7 @@ function checkLiveCookie(ctx, defaultFuncs) {
  */
 const smartSafetyLimiter = {
     userSessions: {},
+    _pruneAt: 0,
 
     // Human-like delay patterns to avoid detection
     humanDelays: {
@@ -1648,6 +1938,19 @@ const smartSafetyLimiter = {
                 lastActivity: Date.now(),
                 riskLevel: 'low'
             };
+        }
+
+        // NEXUS PRODUCTION: prune idle sessions so this table can't grow
+        // unbounded over months of uptime with thousands of users/threads.
+        // Runs at most every 5 minutes; entries idle > 1h are dropped.
+        const nowPrune = Date.now();
+        if (this._pruneAt < nowPrune) {
+            this._pruneAt = nowPrune + 5 * 60 * 1000;
+            for (const key of Object.keys(this.userSessions)) {
+                if (nowPrune - this.userSessions[key].lastActivity > 60 * 60 * 1000) {
+                    delete this.userSessions[key];
+                }
+            }
         }
 
         const session = this.userSessions[userID];
@@ -1889,12 +2192,17 @@ module.exports = {
         return null;
     },
     getType,
+    getHeaders,
+    hintsForUA,
     _formatAttachment,
     formatHistoryMessage,
     formatID,
     formatMessage,
     formatDeltaEvent,
     formatDeltaMessage,
+    formatMentions,
+    normalizeMentionID,
+    parseMentionData,
     formatProxyPresence,
     formatPresence,
     formatTyp,
@@ -1919,5 +2227,6 @@ module.exports = {
     safeMode,
     ultraSafeMode,
     isUserAllowed,
-    getLatestDocIDs
+    getLatestDocIDs,
+    randomUserAgent
 };

@@ -1,6 +1,28 @@
 "use strict";
 var utils = require("../utils");
 var log = require("npmlog");
+var cheerio = require("cheerio");
+
+// Format data from mbasic fallback
+function formatMbasicData(userId, name, profileUrl) {
+	const retObj = {};
+	retObj[userId] = {
+		name: name || "Facebook User",
+		firstName: name ? name.split(' ')[0] : "User",
+		vanity: null,
+		thumbSrc: `https://graph.facebook.com/${userId}/picture?type=large`,
+		profileUrl: profileUrl || `https://www.facebook.com/${userId}`,
+		gender: null,
+		type: "user",
+		isFriend: false,
+		isMessengerUser: true,
+		isMessageBlockedByViewer: false,
+		workInfo: null,
+		messengerStatus: null
+	};
+	return retObj;
+}
+
 module.exports = function (defaultFuncs, api, ctx) {
 	function formatData(data) {
 		const retObj = {};
@@ -22,6 +44,29 @@ module.exports = function (defaultFuncs, api, ctx) {
 		}
 		return retObj;
 	}
+
+	// Mbasic fallback function
+	async function getUserInfoMbasic(userId) {
+		try {
+			const url = `https://mbasic.facebook.com/profile.php?id=${userId}`;
+			const res = await defaultFuncs.get(url, ctx.jar);
+			const $ = cheerio.load(res.body);
+			
+			// Try to extract name from profile
+			let name = $('title').text().replace(' | Facebook', '').trim();
+			if (!name || name === 'Facebook') {
+				name = $('h1').first().text().trim() || 
+					   $('strong').first().text().trim() ||
+					   "Facebook User";
+			}
+			
+			return formatMbasicData(userId, name, url);
+		} catch (err) {
+			log.warn("getUserInfo", "Mbasic fallback failed:", err.message);
+			return formatMbasicData(userId, "Facebook User", null);
+		}
+	}
+
 	return function getUserInfoGraphQL(id, callback) {
 		let resolveFunc, rejectFunc;
 		const returnPromise = new Promise((resolve, reject) => {
@@ -46,6 +91,12 @@ module.exports = function (defaultFuncs, api, ctx) {
 			}),
 			batch_name: "MessengerParticipantsFetcher"
 		};
+
+		// Add fb_dtsg if available
+		if (ctx.fb_dtsg) {
+			form.fb_dtsg = ctx.fb_dtsg;
+		}
+
 		defaultFuncs
 			.post("https://www.facebook.com/api/graphqlbatch/", ctx.jar, form)
 			.then(utils.parseAndCheckLogin(ctx, defaultFuncs))
@@ -71,9 +122,22 @@ module.exports = function (defaultFuncs, api, ctx) {
 				const formattedData = formatData(result);
 				return callback(null, formattedData);
 			})
-			.catch(err => {
-				log.error("getUserInfoGraphQL", "Error: " + (err.message || "Unknown error occurred"));
-				callback(err);
+			.catch(async function(err) {
+				log.warn("getUserInfoGraphQL", "GraphQL failed, trying mbasic fallback...");
+				
+				// Try mbasic fallback for each ID
+				try {
+					const results = {};
+					for (const userId of ids) {
+						const userData = await getUserInfoMbasic(userId);
+						Object.assign(results, userData);
+					}
+					log.info("getUserInfoGraphQL", "Mbasic fallback successful");
+					return callback(null, results);
+				} catch (fallbackErr) {
+					log.error("getUserInfoGraphQL", "All methods failed:", err.message || "Unknown error");
+					callback(err);
+				}
 			});	
 		return returnPromise;
 	};

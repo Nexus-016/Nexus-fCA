@@ -105,6 +105,26 @@ module.exports = function (defaultFuncs, api, ctx) {
     });
   }
   return function setMessageReaction(reaction, messageID, threadID, callback) {
+    // E2EE route (toru-fca pattern): confirmed E2EE messages go through the
+    // bridge - HTTP/MQTT paths cannot reach E2EE threads. Falls through when
+    // E2EE is off or the message isn't a known E2EE message.
+    if (ctx.globalOptions && ctx.globalOptions.enableE2EE) {
+      try {
+        var _e2eeMod = require("../e2ee");
+        var _jid = global._e2eeMessageMap && global._e2eeMessageMap.get(String(messageID));
+        if (_jid && _e2eeMod.isE2EEChatJid(_jid)) {
+          var _senderJid = (global._e2eeSenderJidMap && global._e2eeSenderJidMap.get(String(messageID))) || null;
+          var _effectiveSender = _senderJid || _jid;
+          _e2eeMod.createBridge(ctx).sendReaction(_jid, messageID, _effectiveSender, reaction)
+            .then(function (r) { if (typeof callback === "function") callback(null, r); })
+            .catch(function (e) {
+              log.error("setMessageReaction", "E2EE sendReaction failed - jid:" + _jid + " err:" + (e && e.message ? e.message : String(e)));
+              if (typeof callback === "function") callback(e);
+            });
+          return;
+        }
+      } catch (_) { /* fall through to normal path */ }
+    }
     if (ctx.mqttClient) {
       try {
         setMessageReactionMqtt(reaction, messageID, threadID, callback);

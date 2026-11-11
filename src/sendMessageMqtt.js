@@ -3,6 +3,24 @@ var log = require("npmlog");
 var bluebird = require("bluebird");
 
 module.exports = function (defaultFuncs, api, ctx) {
+	// Helper function to retry upload with delay
+	async function retryUpload(form, maxRetries = 3, delayMs = 2000) {
+		for (let attempt = 1; attempt <= maxRetries; attempt++) {
+			try {
+				const res = await defaultFuncs
+					.postFormData("https://upload.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {})
+					.then(utils.parseAndCheckLogin(ctx, defaultFuncs));
+				
+				if (res.error) throw res;
+				return res.payload.metadata[0];
+			} catch (err) {
+				if (attempt === maxRetries) throw err;
+				log.warn("uploadAttachment", `Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
+				await new Promise(resolve => setTimeout(resolve, delayMs));
+			}
+		}
+	}
+
 	function uploadAttachment(attachments, callback) {
 		callback = callback || function () { };
 		var uploads = [];
@@ -23,25 +41,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 				voice_clip: "true"
 			};
 
-			uploads.push(
-				defaultFuncs
-					.postFormData(
-						"https://upload.facebook.com/ajax/mercury/upload.php",
-						ctx.jar,
-						form,
-						{}
-					)
-					.then(utils.parseAndCheckLogin(ctx, defaultFuncs))
-					.then(function (resData) {
-						if (resData.error) {
-							throw resData;
-						}
-
-						// We have to return the data unformatted unless we want to change it
-						// back in sendMessage.
-						return resData.payload.metadata[0];
-					})
-			);
+			uploads.push(retryUpload(form));
 		}
 
 		// resolve all promises
@@ -205,7 +205,11 @@ module.exports = function (defaultFuncs, api, ctx) {
 			task.payload = JSON.stringify(task.payload);
 		});
 		form.payload = JSON.stringify(form.payload);
-		try { console.log(global.jsonStringifyColor(form, null, 2)); } catch (_) { }
+		// NEXUS PRODUCTION: dumping the full payload for EVERY send floods the
+		// console and burns CPU under high thread load. Debug only via env.
+		if (process.env.NEXUS_VERBOSE_MQTT === '1') {
+			try { console.log(global.jsonStringifyColor(form, null, 2)); } catch (_) { }
+		}
 
 		// Stage 2: outbound tracking for ACK latency
 		if (!ctx._pendingOutbound) ctx._pendingOutbound = new Map();
@@ -216,7 +220,21 @@ module.exports = function (defaultFuncs, api, ctx) {
 			if (firstTask && firstTask.otid) midCandidate = String(firstTask.otid);
 		} catch (_) { }
 		if (midCandidate) {
-			ctx._pendingOutbound.set(midCandidate, Date.now());
+			// NEXUS PRODUCTION: entries whose ACK never arrives (publish drop,
+			// reconnect, mid mismatch) used to live in this Map forever — an
+			// unbounded leak across a long uptime. TTL sweep (30s gate) + hard cap.
+			const now = Date.now();
+			if (!ctx._pendingOutboundLastSweep || now - ctx._pendingOutboundLastSweep > 30000 || ctx._pendingOutbound.size >= 1000) {
+				ctx._pendingOutboundLastSweep = now;
+				for (const [k, v] of ctx._pendingOutbound) {
+					if (now - v > 3 * 60 * 1000) ctx._pendingOutbound.delete(k);
+				}
+				while (ctx._pendingOutbound.size >= 1000) {
+					ctx._pendingOutbound.delete(ctx._pendingOutbound.keys().next().value);
+					if (ctx.health) ctx.health.incOutboundDropped();
+				}
+			}
+			ctx._pendingOutbound.set(midCandidate, now);
 			if (ctx.health) ctx.health.trackOutbound(ctx._pendingOutbound.size);
 		}
 
