@@ -22,11 +22,11 @@ module.exports = function (defaultFuncs, api, ctx) {
     }
 
     if (Object.keys(obj).length === 0) {
-      // Primary: Use fca-unofficial's simple and robust method first
+      // Primary: simple and robust method first
       utils.get("https://www.facebook.com/", ctx.jar, null, ctx.globalOptions, { noRef: true })
         .then(res => {
           const html = res.body;
-          // fca-unofficial patterns
+          // Extraction patterns
           const fb_dtsg = utils.getFrom(html, '["DTSGInitData",[],{"token":"', '","') ||
                           utils.getFrom(html, '"DTSGInitData",[],{"token":"', '","');
           

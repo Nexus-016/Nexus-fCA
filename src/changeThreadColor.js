@@ -73,8 +73,8 @@ module.exports = function (defaultFuncs, api, ctx) {
             if (jsonMsg.request_id !== reqID) return;
             ctx.mqttClient.removeListener("message", handleRes);
             try {
-                // Check if payload has nested structure as expected by fca-unofficial
-                // or if it's simpler. We try to extract like fca-unofficial does.
+                // Check if payload has nested structure
+                // or a simpler shape; extract accordingly.
                 const msgID = jsonMsg.payload.step[1][2][2][1][2];
                 const msgReplace = jsonMsg.payload.step[1][2][2][1][4];
                 const bodies = {

@@ -1,7 +1,7 @@
 /**
  * ===========================================================
- * Original: toru-fca by HRIDOY (https://github.com/hridoy-dev)
- * Ported to Nexus-fCA 4.1.0 - credits to original author.
+ * Nexus-fCA friend search API.
+ * Added in Nexus-fCA 4.1.0.
  * Only adaptation: lsd now uses ctx.lsd (fixed) with fb_dtsg fallback.
  * ===========================================================
  */

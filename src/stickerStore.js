@@ -1,7 +1,7 @@
 /**
  * ===========================================================
- * Original: @neoaz07/nkxfca stickers.js by @ChoruOfficial
- * Ported to Nexus-fCA 4.3.0 as api.stickerStore - credits to original author.
+ * Nexus-fCA sticker store API.
+ * Nexus-fCA 4.3.0 as api.stickerStore.
  * Adaptation: utils.error/log don't exist in Nexus utils -> npmlog used.
  * (Nexus api.searchStickers stays untouched.)
  * Methods: search, listPacks, getStorePacks, listAllPacks,

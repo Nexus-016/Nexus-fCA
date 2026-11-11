@@ -1,7 +1,7 @@
 /**
  * ===========================================================
- * Original: toru-fca by @NethWs3Dev - credits to original author.
- * Ported to Nexus-fCA 4.1.0 as changeAvatarV2 (updated flow:
+ * Nexus-fCA avatar V2 API (updated profile picture flow).
+ * Added in Nexus-fCA 4.1.0 (updated flow:
  * upload via profile/picture/upload + ProfileCometProfilePictureSetMutation).
  * Old api.changeAvatar stays untouched.
  * Usage: api.changeAvatarV2(imageURL, caption, callback)

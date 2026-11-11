@@ -515,8 +515,8 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   const chatOn = (ctx.globalOptions && ctx.globalOptions.online === false) ? false : true;
   const foreground = getForegroundState(ctx);
   
-  // ws3-fca style: Generate fresh sessionID on EACH reconnect
-  // This matches fca-unofficial behavior and prevents stale session issues
+  // Generate fresh sessionID on EACH reconnect
+  // Prevents stale session issues
   const sessionID = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) + 1;
 
   // Use stable clientID from context (generated at login) or persist one
@@ -554,7 +554,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   // jitter user agent keep consistent
   const cookies = ctx.jar.getCookies("https://www.facebook.com").join("; ");
   
-  // MQTT Host Selection - ws3-fca uses messenger.com, we support both with option
+  // MQTT Host Selection - messenger.com or facebook.com via option
   // messenger.com endpoint appears more stable for some accounts
   let host;
   const useMessengerDomain = ctx.globalOptions.mqttUseMessengerDomain;
@@ -572,7 +572,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
   const hostHeader = useMessengerDomain ? 'edge-chat.messenger.com' : 'edge-chat.facebook.com';
   
   const options = {
-    clientId: "mqttwsclient", // Use static clientID to match fca-unofficial
+    clientId: "mqttwsclient", // Use static clientID
     protocolId: "MQIsdp",
     protocolVersion: 3,
     username: JSON.stringify(username),

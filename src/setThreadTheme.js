@@ -1,7 +1,7 @@
 /**
  * ===========================================================
- * Original: toru-fca by HRIDOY (https://github.com/hridoy-dev)
- * Ported to Nexus-fCA 4.1.0 - credits to original author.
+ * Nexus-fCA thread theme API.
+ * Added in Nexus-fCA 4.1.0.
  * Applies a full theme (incl. AI-generated) to a thread over MQTT.
  * Usage: api.setThreadTheme(threadID, themeFBID, callback)
  * ===========================================================

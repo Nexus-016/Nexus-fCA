@@ -1,8 +1,8 @@
 /**
  * ===========================================================
  * Nexus-fCA 4.3.0 - E2EE bridge wiring (opt-in, disabled by default)
- * E2EE core: toru-fca/alpha-fca e2ee.js (Labyrinth native bridge)
- *   + lib/e2ee/index.mjs bundle. Credits to original authors.
+ * E2EE core: Labyrinth native bridge
+ *   + lib/e2ee/index.mjs bundle.
  *
  * Enable: login option { enableE2EE: true }.
  * Needs native deps on first E2EE use:

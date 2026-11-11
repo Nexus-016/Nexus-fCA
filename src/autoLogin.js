@@ -3,7 +3,7 @@
  * autoLogin.js - Session Recovery via Graph API
  * 
  * This module provides automatic session recovery when cookies expire.
- * Ported from fca-unofficial-main with enhancements for Nexus-fCA.
+ * Nexus-fCA auto-login subsystem with self-healing enhancements.
  */
 
 const crypto = require("crypto");

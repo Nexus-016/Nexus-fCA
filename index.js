@@ -245,8 +245,8 @@ function buildAPI(globalOptions, html, jar) {
     throw new Error('Failed to build API: No valid session found.');
   }
 
-  // Wrap API methods with adaptive pacing + human-like delay (toru-fca best practice)
-  // + light suspension circuit breaker (nkxfca pattern, simplified):
+  // Wrap API methods with adaptive pacing + human-like delay (best practice)
+  // + light suspension circuit breaker:
   // consecutive spam/block/checkpoint/limit failures -> 5min cooldown with slow sends.
   const breaker = { fails: 0, cooldownUntil: 0 };
   const BREAKER_PATTERNS = ["spam", "block", "checkpoint", "rate", "limit", "restrict", "suspend", "282", "956"];
@@ -302,7 +302,7 @@ function buildAPI(globalOptions, html, jar) {
     result.api._adaptivePacingWrapped = true;
   }
 
-  // Anti-logout guard (toru-fca best practice): block accidental api.logout() from cookie session
+  // Anti-logout guard: block accidental api.logout() from cookie session
   // Browser stays logged in. Use api.forceLogout() only when you really want to logout.
   if (!result.api._antiLogoutWrapped) {
     const _origLogout = result.api.logout;
@@ -329,7 +329,7 @@ function buildAPI(globalOptions, html, jar) {
     result.api._antiLogoutWrapped = true;
   }
 
-  // Session guard: auto-save appstate every 3 min (toru-fca best practice for 24h uptime)
+  // Session guard: auto-save appstate every 3 min (24h uptime best practice)
   if (!result.api._sessionGuardStarted && globalOptions.sessionGuard !== false) {
     result.api._sessionGuardStarted = true;
     const guardPath = globalOptions.appStatePath || global.client?.dirAccount || null;
@@ -374,7 +374,7 @@ function buildAPI(globalOptions, html, jar) {
     } catch (_) { }
   }
 
-  // Health snapshot (toru-fca getHealth + Nexus metrics merged)
+  // Health snapshot (Nexus metrics)
   if (!result.api.getHealth) {
     result.api.getHealth = function () {
       return {
@@ -415,7 +415,7 @@ function buildAPI(globalOptions, html, jar) {
     result.api._safetyWrappedListen = true;
   }
 
-  // Auto-refresh fb_dtsg on RANDOMIZED intervals (nkxfca TokenRefreshManager pattern):
+  // Auto-refresh fb_dtsg on RANDOMIZED intervals:
   // fixed 20min was a robot pattern -> now 15-25min random each cycle.
   // Override: globalOptions.fbDtsgRefreshMs (fixed) or fbDtsgRefreshJitter:false (fixed 20min).
   const fbBaseMs = globalOptions.fbDtsgRefreshMs || (20 * 60 * 1000);

@@ -5,7 +5,7 @@ const utils = require("../utils");
 
 module.exports = function (defaultFuncs, api, ctx) {
   return function createAITheme(prompt, numThemes, callback) {
-    // nkxfca parity: createAITheme(prompt, numThemes?, callback) - up to 10 themes
+    // createAITheme(prompt, numThemes?, callback) - up to 10 themes
     if (typeof numThemes === "function") {
       callback = numThemes;
       numThemes = 1;
@@ -159,7 +159,7 @@ module.exports = function (defaultFuncs, api, ctx) {
               url: theme.background_asset.image?.uri || null
             }
           },
-          // nkxfca parity: all generated themes when numThemes > 1 (full data kept)
+          // all generated themes when numThemes > 1 (full data kept)
           allThemes: themes.filter(t => t && t.id).map(normalizeTheme)
         });
       })

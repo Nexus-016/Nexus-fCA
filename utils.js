@@ -106,7 +106,7 @@ function sanitizeHeaderName(name) {
 }
 
 // Build stable Client Hints for a fixed User-Agent string
-// (used by fingerprint lock + ws3-compat randomUserAgent:false mode)
+// (used by fingerprint lock + fixed-UA mode)
 function hintsForUA(userAgent) {
     const m = String(userAgent).match(/Chrome\/(\d+)/);
     const major = m ? m[1] : "141";
@@ -129,12 +129,12 @@ function hintsForUA(userAgent) {
 }
 
 function getHeaders(url, options, ctx, customHeader) {
-    // FINGERPRINT LOCK (ws3-fca/nkxfca best practice):
+    // FINGERPRINT LOCK (best practice):
     // A real browser NEVER changes its User-Agent per request. Old code called
     // randomUserAgent() on EVERY request -> rotating fingerprint = bot signal.
     // Now: one UA + Client Hints locked per session (ctx._fpLocked).
     // Opt-outs: fingerprintLock:false (rotate like before),
-    //           or ws3-compat randomUserAgent:false + userAgent string (fixed UA).
+    //           or randomUserAgent:false with a fixed userAgent string (fixed UA).
     let fp = null;
     const gOpts = (ctx && ctx.globalOptions) || {};
     if (ctx && ctx._fpLocked) {
@@ -216,7 +216,7 @@ function getHeaders(url, options, ctx, customHeader) {
         }
     }
 
-    // 5. Final Sanitization Pass (from fca-unofficial)
+    // 5. Final Sanitization Pass
     const sanitizedHeaders = {};
     for (const [key, value] of Object.entries(headers)) {
         const sanitizedKey = sanitizeHeaderName(key);
@@ -299,7 +299,7 @@ async function post(url, jar, form, options, ctx, customHeader) {
         agent: getAgent(url)
     };
 
-    // Manual body construction to match ws3-fca / request behavior
+    // Manual body construction (request-compatible behavior)
     if (form) {
         // 1. Clean null/undefined
         form = cleanObject(form);
@@ -316,7 +316,7 @@ async function post(url, jar, form, options, ctx, customHeader) {
             for (const key in form) {
                 if (form.hasOwnProperty(key)) {
                     let value = form[key];
-                    // Stringify nested objects (but not Arrays, unless ws3-fca does? ws3-fca checks getType(value) === "Object")
+                    // Stringify nested objects (but not Arrays)
                     if (getType(value) === "Object") {
                         value = JSON.stringify(value);
                     }
@@ -510,7 +510,7 @@ function generatePresence(userID) {
 
 /**
  * Generate a unique MQTT client ID for each connection
- * ws3-fca style: Fresh clientID on each reconnect prevents Facebook from
+ * Fresh clientID on each reconnect prevents Facebook from
  * detecting "stale" sessions and force-disconnecting
  * @returns {string} Unique client identifier
  */

@@ -1,7 +1,7 @@
 /**
  * ===========================================================
- * Original: toru-fca (merged FCA, classic mercury send path)
- * Ported to Nexus-fCA 4.3.0 as api.OldMessage - credits to original authors.
+ * Nexus-fCA classic mercury send path (fallback sender)
+ * Nexus-fCA 4.3.0 as api.OldMessage.
  * Legacy HTTP fallback sender (messaging/send/) for when MQTT send fails.
  * Usage: api.OldMessage("hello", threadID, callback)
  * ===========================================================

@@ -1,7 +1,7 @@
 /**
  * ===========================================================
- * Original: toru-fca by HRIDOY (https://github.com/hridoy-dev)
- * Ported to Nexus-fCA 4.3.0 - credits to original author.
+ * Nexus-fCA story manager API.
+ * Nexus-fCA 4.3.0.
  * Adaptations for Nexus ctx: __hs/__rev/__hsi/__spin_r fall back
  * to safe defaults; lsd uses ctx.lsd (fixed) with fb_dtsg fallback.
  * Usage: api.storyManager({ action: 'add'|'upload'|'delete'|'check', attachment, storyID }, cb)

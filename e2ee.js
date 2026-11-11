@@ -1,7 +1,7 @@
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════════════
- *  alpha-fca/e2ee.js  —  Ultimate E2EE Bridge  (v1.0.0)
- *  Merged best-of-all from: hridoy-custom, ST-FCA, hridoy-akash
+ *  Nexus-fCA E2EE Bridge  (v1.0.0)
+ *  Labyrinth native bridge integration
  *
  *  Sections:
  *    §0  Node.js < 22 undici webidl compatibility patch

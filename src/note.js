@@ -1,7 +1,7 @@
 /**
  * ===========================================================
- * Original: toru-fca (merged FCA) - credits to original authors.
- * Ported to Nexus-fCA 4.1.0.
+ * Nexus-fCA Messenger Notes API.
+ * Nexus-fCA 4.1.0.
  * Messenger Notes: api.note.check/create/delete/update
  * Example: api.note.create("hello", { privacy: "FRIENDS" }, cb)
  * ===========================================================

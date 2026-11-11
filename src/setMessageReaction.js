@@ -105,7 +105,7 @@ module.exports = function (defaultFuncs, api, ctx) {
     });
   }
   return function setMessageReaction(reaction, messageID, threadID, callback) {
-    // E2EE route (toru-fca pattern): confirmed E2EE messages go through the
+    // E2EE route: confirmed E2EE messages go through the
     // bridge - HTTP/MQTT paths cannot reach E2EE threads. Falls through when
     // E2EE is off or the message isn't a known E2EE message.
     if (ctx.globalOptions && ctx.globalOptions.enableE2EE) {

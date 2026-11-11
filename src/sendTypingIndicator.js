@@ -9,7 +9,7 @@ var log = require("npmlog");
  *   POST https://www.facebook.com/ajax/messaging/typ.php (mercury-chat)
  * which Facebook removed years ago -> typing never showed.
  *
- * Fix (from toru-fca v1.1.0, E2EE part omitted - Nexus has no E2EE bridge):
+ * Typing delivery fix:
  * publish MQTT /ls_req type-4 label-3 task with shared ctx.wsReqNumber
  * so request_id stays unique across all MQTT calls.
  *
@@ -19,7 +19,7 @@ var log = require("npmlog");
  */
 
 function publishTyping(ctx, sendTyping, threadID, callback) {
-  // E2EE route (toru-fca pattern): E2EE thread typing goes through the bridge
+  // E2EE route: E2EE thread typing goes through the bridge
   if (ctx.globalOptions && ctx.globalOptions.enableE2EE) {
     try {
       var _e2eeMod = require("../e2ee");

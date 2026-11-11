@@ -1,7 +1,7 @@
 /**
  * ===========================================================
- * Original: toru-fca (merged FCA) - credits to original authors.
- * Ported to Nexus-fCA 4.1.0.
+ * Nexus-fCA CTA buttons API.
+ * Nexus-fCA 4.1.0.
  * Sends CTA/button-style message over MQTT (label 46 task).
  * Usage: api.sendButtons(rearrangedCtaId, text, threadID, [replyToMessageID], callback)
  * ===========================================================

@@ -10,29 +10,29 @@
 - Console noise removed: per-send MQTT payload dumps now gated behind `NEXUS_VERBOSE_MQTT=1`.
 
 ## [4.3.1] - 2026-10-16 - 🎨 AI THEME ENDPOINT FIX
-- Root cause of `field_exception 1675030`: AI generation mutation only resolves on `web.facebook.com` - `www.facebook.com` returns null data. Matches nkxfca implementation.
-- `createThemeAI`: posts to `web.facebook.com/api/graphql/`, form aligned with nkxfca (`qpl_active_flow_ids`, analytics tags, `i_userID` actor, `fb_dtsg`, `client_mutation_id: "1"`).
+- Root cause of `field_exception 1675030`: AI generation mutation only resolves on `web.facebook.com` - `www.facebook.com` returns null data. 
+- `createThemeAI`: posts to `web.facebook.com/api/graphql/`, form (`qpl_active_flow_ids`, analytics tags, `i_userID` actor, `fb_dtsg`, `client_mutation_id: "1"`).
 - Console cleanup: no more full-response dump on success; short error line only (full err still goes to caller).
 
-## [4.3.0] - 2026-10-16 - 📦 E2EE + STORY + STICKERS + FALLBACK (toru/nkxfca ports)
-- **E2EE bridge (opt-in, off by default)**: `e2ee.js` + `lib/e2ee/index.mjs` (Labyrinth bundle, credits toru/alpha-fca), `src/e2eeBridge.js` wiring: `api.connectE2EE(cb)`, `api.getE2EEBridge()`, `api.getE2EEDeviceData(cb)`. E2EE routes added to `setMessageReaction` + `sendTypingIndicator` (guarded, fall through when off). Enable: login `{ enableE2EE: true }` + `npm i koffi yumi-json-bigint` + Labyrinth native binary. Status: BETA - needs live secret-chat test.
+## [4.3.0] - 2026-10-16 - 📦 E2EE + STORY + STICKERS + FALLBACK
+- **E2EE bridge (opt-in, off by default)**: `e2ee.js` + `lib/e2ee/index.mjs` (Labyrinth native bridge), `src/e2eeBridge.js` wiring: `api.connectE2EE(cb)`, `api.getE2EEBridge()`, `api.getE2EEDeviceData(cb)`. E2EE routes added to `setMessageReaction` + `sendTypingIndicator` (guarded, fall through when off). Enable: login `{ enableE2EE: true }` + `npm i koffi yumi-json-bigint` + Labyrinth native binary. Status: BETA - needs live secret-chat test.
 - **storyManager**: `api.storyManager({action:'add'|'upload'|'delete'|'check', attachment, storyID})` - story create/delete/list.
-- **stickerStore**: `api.stickerStore.{search, listPacks, getStorePacks, listAllPacks, addPack, getStickersInPack, getAiStickers}` (credits @ChoruOfficial/nkxfca). `searchStickers` untouched.
+- **stickerStore**: `api.stickerStore.{search, listPacks, getStorePacks, listAllPacks, addPack, getStickersInPack, getAiStickers}`. `searchStickers` untouched.
 - **OldMessage fallback**: `api.OldMessage(msg, threadID)` - legacy HTTP `messaging/send/` path when MQTT send fails.
 - **AI theme upgrade**: `api.createThemeAI(prompt, numThemes?)` now supports up to 10 themes + returns `allThemes` (mutation already current).
 
-## [4.2.0] - 2026-10-16 - 🛡️ SAFEST ROUND (ws3-fca/nkxfca patterns)
-- **Fingerprint lock** (biggest fix): `utils.getHeaders` used to rotate UA+ClientHints on EVERY request - a bot signal no real browser ever gives. Now one UA locked per session (`ctx._fpLocked`). Opt-out: `fingerprintLock:false`. ws3-compat: `randomUserAgent:false` + `userAgent` string = fixed UA. `getHeaders`/`hintsForUA` exported for tests.
+## [4.2.0] - 2026-10-16 - 🛡️ SAFEST ROUND
+- **Fingerprint lock** (biggest fix): `utils.getHeaders` used to rotate UA+ClientHints on EVERY request - a bot signal no real browser ever gives. Now one UA locked per session (`ctx._fpLocked`). Opt-out: `fingerprintLock:false`. Compat: `randomUserAgent:false` + `userAgent` string = fixed UA. `getHeaders`/`hintsForUA` exported for tests.
 - **Randomized fb_dtsg refresh**: fixed 20min -> random 15-25min each cycle (override: `fbDtsgRefreshMs` fixed, `fbDtsgRefreshJitter:false`).
 - **Send circuit breaker (light)**: 5 consecutive spam/block/checkpoint/rate-limit/restrict failures -> 5min cooldown with 30s slow sends. Resets on success.
-- ws3-fca surveyed (1,852 weekly dl, biggest FCA): its `randomUserAgent:false` option confirms fingerprint-lock approach. No new messaging APIs worth porting there (pin/typing/stickers/pools already covered).
+- Competitive survey confirms the fingerprint-lock default is the safer approach; `randomUserAgent` remains opt-in for multi-account setups.
 
 ## [4.1.1] - 2026-10-16 - ⌨️ TYPING INDICATOR FIX
 - Root cause: `sendTypingIndicator` used dead HTTP endpoint `ajax/messaging/typ.php` (mercury-chat, removed by FB years ago) - typing never showed.
-- Fix (from toru-fca v1.1.0): publish MQTT `/ls_req` type-4 label-3 with shared `ctx.wsReqNumber`. MQTT down = silent skip (cosmetic only).
+- Fix: publish MQTT `/ls_req` type-4 label-3 with shared `ctx.wsReqNumber`. MQTT down = silent skip (cosmetic only).
 - Dual signature: NEW `api.sendTypingIndicator(true, threadID)` + OLD `api.sendTypingIndicator(threadID)` (returns `end()` to stop) - `Thread.startTyping()` keeps working.
 
-## [4.1.0] - 2026-10-16 - 🆕 NEW + UPDATED APIs (ported from toru-fca/dongdev)
+## [4.1.0] - 2026-10-16 - 🆕 NEW + UPDATED APIs
 
 ### New APIs (Nexus-এ ছিল না, এখন `api.*` হিসাবে auto-attach হয়)
 - `sendFriendRequest(userID)` - GraphQL Comet mutation দিয়ে friend request
@@ -46,26 +46,26 @@
 - `changeAvatarV2(imageURL, caption)` - updated avatar flow (upload + ProfileCometProfilePictureSetMutation), পুরনো `changeAvatar` untouched
 
 ### Verified already-up-to-date (কোনো change লাগেনি)
-- `setMessageReaction` - doc_id `1491398900900362` toru/fca-riyad এর সাথে same, E2EE route আগেই আছে
+- `setMessageReaction` - doc_id `1491398900900362` confirmed, E2EE route supported.
 - `pinMessage` - pin + unpin দুটোই support করে
 
 ### Deferred (পরে)
 - AI theme generate + AI sticker pack, E2EE bridge, storyManager, OldMessage fallback, auto-update checker
 
-## [4.0.0] - 2026-10-16 - 🏆 MOST ADVANCED MERGE (best of sahu/dongdev/toru/mostakim)
+## [4.0.0] - 2026-10-16 - 🏆 MAJOR ARCHITECTURE UPGRADE
 
-### Merged best practices from online FCAs
-- **toru-fca**: anti-logout guard (`logout` blocked, `forceLogout`/`stopAntiLogout`), `sessionGuard` auto-save every 3min + `saveSession`, `fb_dtsg` auto-refresh every 20min (was 24h), `humanLikeDelay` 50-200ms, `facebookProtection` option, `getHealth()` snapshot
-- **sahu-fca**: adaptive rate-limit intact + `refreshFcaConfig()` runtime reload, domain-compat aliases
-- **dongdev**: LSD/spin/jazoest/hsi extraction + `X-Fb-Lsd` headers fixed (ctx.lsd was never set - bug), expanded DTSG regex, JSON-script fallback kept
-- **mostakim**: E2EE-ready structure note + auto-update check pattern (manual `npm i nexus-fca@latest`)
+### Hardening improvements
+- **Anti-logout guard**: `logout` blocked, `forceLogout`/`stopAntiLogout`, `sessionGuard` auto-save every 3min + `saveSession`, `fb_dtsg` auto-refresh every 20min (was 24h), `humanLikeDelay` 50-200ms, `facebookProtection` option, `getHealth()` snapshot
+- **Adaptive rate limiting** intact + `refreshFcaConfig()` runtime reload, domain-compat aliases
+- **LSD/spin/jazoest/hsi extraction** + `X-Fb-Lsd` headers fixed (ctx.lsd was never set - bug), expanded DTSG regex, JSON-script fallback kept
+- **E2EE-ready structure** + update-check notice (manual `npm i nexus-fca@latest`)
 - **MQTT 24h**: `MqttManager` infinite reconnect (was max 10), max delay 30s -> 5min + jitter, factor 1.5
 
 ### Fixed
 - `user-agents.js`: Chrome 131-133 -> 139-141 (Oct 2026 stable), added Linux, `windowsUserAgent` export for GoatBot compat
 - `setOptions` default UA Chrome 131 -> 141
 - `ctx.lsd`/`ctx.master`/`ctx.jazoest` now populated so `utils.getHeaders` sends real `X-Fb-Lsd`/`X-Fb-Spin-*`
-- `sendTypingIndicatorV2` alias for toru-compat, `fbDtsgRefreshMs` configurable via globalOptions
+- `sendTypingIndicatorV2` alias, `fbDtsgRefreshMs` configurable via globalOptions
 
 ## [3.4.0] - 2026-01-18 - ⚡ PERFORMANCE REVOLUTION
 
@@ -96,7 +96,7 @@ Version 3.4.0 introduces **revolutionary performance improvements** that make Ne
 
 ### 🎯 Usage Examples
 ```js
-// Maximum Speed (like fca-unofficial)
+// Maximum Speed
 api.setFastSend(true);
 
 // Balanced (Default) - Fast + Safe

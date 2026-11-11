@@ -145,7 +145,7 @@ No messages received | Verify MQTT topics, ensure `listen` not replaced by older
 ## FAQ
 Q: How to speed up without raising risk?  
 A: Use `api.setParallelSend(3)` (default) for balanced speed. For max speed use `api.setFastSend(true)` but with caution.  
-Q: How to get instant replies like fca-unofficial?  
+Q: How to get instant replies?  
 A: Call `api.setFastSend(true)` after login. This bypasses the queue for immediate sends.  
 Q: Can I rotate devices manually?  
 A: Delete `persistent-device.json` and re-run with `persistentDevice: true` for a new stable profile.  

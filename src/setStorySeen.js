@@ -1,7 +1,7 @@
 /**
  * ===========================================================
- * Original: toru-fca by HRIDOY (https://github.com/hridoy-dev)
- * Ported to Nexus-fCA 4.1.0 - credits to original author.
+ * Nexus-fCA story-seen API.
+ * Added in Nexus-fCA 4.1.0.
  * Adaptations for Nexus ctx: no fb_dtsg_ag/req_ID fields here,
  * so fall back to safe defaults; jazoest uses ctx.ttstamp;
  * lsd uses ctx.lsd (fixed) with fb_dtsg fallback.
