@@ -600,7 +600,10 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
         // account file (Goat-Bot sets global.client.dirAccount) so the
         // CookieRefresher actually runs inside the bot instead of silently
         // never starting.
-        const appstatePath = globalOptions.appstatePath || process.env.NEXUS_APPSTATE_PATH || (global.client && global.client.dirAccount) || (ctx.dataDir ? path.join(ctx.dataDir, 'appstate.json') : null);
+        // NEXUS FIX: accept both spellings — Goat-Bot passes appStatePath
+        // (camelCase S) while this line used to read only appstatePath, so
+        // the refresher silently depended on the global.client fallback.
+        const appstatePath = globalOptions.appStatePath || globalOptions.appstatePath || process.env.NEXUS_APPSTATE_PATH || (global.client && global.client.dirAccount) || (ctx.dataDir ? path.join(ctx.dataDir, 'appstate.json') : null);
         const backupPath = process.env.NEXUS_COOKIE_BACKUP_PATH || globalOptions.backupPath || (ctx.dataDir ? path.join(ctx.dataDir, 'backups') : null);
 
         if (appstatePath) {

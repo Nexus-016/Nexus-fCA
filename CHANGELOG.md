@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.4.1] - 2026-11-13 - 🔧 SESSION STABILITY HOTFIX
+
+### Overview
+Three production-blocking session bugs are fixed and verified against live Facebook traffic: fresh cookies are no longer rejected at login, the MQTT listener no longer dies on the broker's non-compliant PUBACK replies, and the cookie refresher no longer reports healthy sessions as failed.
+
+### Fixed
+- **Login false-positive (critical)**: `loginWithAppState` matched a bare `"/login.php"` substring — but logged-in home pages embed escaped login.php URLs in their prefetch/bootstrap config, so fresh cookies were rejected as "cookie session expired". Detection is now evidence-based: the session counts as alive when the account's `c_user`/`i_user` id appears in the page bootstrap (a real login form is the fallback signal), and a suspicious page is confirmed once against `home.php` before it is declared dead. Checkpoint markers stay decisive.
+- **MQTT reconnect loop (critical)**: Facebook's edge-chat broker now answers QoS-1 PUBLISHes with MQTT5-style PUBACK headers (flag bits set), while the mqtt-packet parser (9.0.2, latest) still enforces `flags == 0x0` for PUBACK — the session died right after queue creation with `Invalid header flag bits, must be 0x0 for puback packet` and looped reconnects forever. `buildStream` now normalizes incoming WebSocket buffers (`normalizeBrokerMqttPackets`): non-compliant PUBACKs are rewritten in place (flags cleared, a present reason code stripped); compliant packets pass through untouched. Also keeps QoS-1 sends stable mid-session.
+- **Cookie refresher false failure (critical)**: `performRefresh` used `defaultFuncs.get`, which injects API-style query params (`__a=1`, `__user`, `fb_dtsg`...) — Facebook rejects a plain page GET carrying those with error 1357004 in a ~250-byte async wrapper, and the success criterion (`res.headers["set-cookie"]` present) can never be met on a healthy session anyway: once every cookie is still valid, Facebook sends no Set-Cookie at all. Refreshes now use the plain `utils.get` request shape (same as login) and success = sane status + the account id present in the page body.
+- **`refreshFb_dtsg` false "Session expired"**: the token refresher's dead-check used the same bare-substring matching and warned "Session expired" on every cycle of a healthy session. Dead-check is now evidence-based (`ctx.userID` present in the page = proof; www.facebook.com is proof-trusted, other sources require an explicit login form), and the self-heal restart is keyed on the `sawSessionExpired` flag instead of error-message matching.
+- **Appstate-path option spelling**: the CookieRefresher resolver read only `appstatePath` and ApiFactory only `appStatePath` — both now accept either spelling.
+- **Boot noise**: `attachSrcMethods` no longer warns for `autoLogin.js` (it intentionally exports helpers as an object; `createPerformAutoLogin` is wired directly in the context builder).
+
+### Verification (live, against real Facebook endpoints)
+- Fresh-cookie login succeeds (full logged-in page); corrupted cookies still route into the anti-lock guard. 10/10 checks.
+- MQTT: CONNACK + SUBACKs + QoS-1 PUBACKs parsed, `/t_ms` firstDelta + syncToken received, presence updates flowing, zero reconnects across the observation window. 10/10 checks.
+- Cookie refresher: immediate refresh succeeds, `appstate.json` saved with extended expiry, backup created. 9/9 checks.
+- A full login boot logs zero warnings.
+
 ## [4.4.0] - 2026-11-12 - 🛡️ PRODUCTION HARDENING + DEPS MODERNIZATION
 - **UA fingerprint lock**: one stable Chrome/141 UA per session — login = HTTP headers = MQTT = cookie check all share it (seeded from `globalOptions.userAgent`), stored in `Fca_Database/safety_store.json` (stale-version UAs rejected on load).
 - **Login-time dead-cookie detection**: expired cookies caught in `LoginManager` before MQTT start; typed lock patterns (checkpoint / unusual_activity / account_locked / verification_required / login_approval / `cookie_invalid`) with patient retry backoff 15→30→60 min that re-reads `appstate.json` — never a hot `process.exit`.
@@ -8,6 +27,12 @@
 - **sqlite hardening**: WAL + `busy_timeout 5000` on every database, 24h metrics retention.
 - **Dependencies modernized**: mqtt 4→5.16.1 (live-tested MQIsdp/3 + custom `wsOptions` headers over WS), uuid 9→11.1 (last require()-compatible major), ws 8.22.2, cheerio/axios pinned current, tough-cookie/jar-support aligned to runtime-proven 5.x; `engines >= 20`.
 - Console noise removed: per-send MQTT payload dumps now gated behind `NEXUS_VERBOSE_MQTT=1`.
+
+### Fixed (4.4.0 work)
+- `user-agents.js`: Chrome 131-133 -> 139-141 (Oct 2026 stable), added Linux, `windowsUserAgent` export for GoatBot compat
+- `setOptions` default UA Chrome 131 -> 141
+- `ctx.lsd`/`ctx.master`/`ctx.jazoest` now populated so `utils.getHeaders` sends real `X-Fb-Lsd`/`X-Fb-Spin-*`
+- `sendTypingIndicatorV2` alias, `fbDtsgRefreshMs` configurable via globalOptions
 
 ## [4.3.1] - 2026-10-16 - 🎨 AI THEME ENDPOINT FIX
 - Root cause of `field_exception 1675030`: AI generation mutation only resolves on `web.facebook.com` - `www.facebook.com` returns null data. 
@@ -60,12 +85,6 @@
 - **LSD/spin/jazoest/hsi extraction** + `X-Fb-Lsd` headers fixed (ctx.lsd was never set - bug), expanded DTSG regex, JSON-script fallback kept
 - **E2EE-ready structure** + update-check notice (manual `npm i nexus-fca@latest`)
 - **MQTT 24h**: `MqttManager` infinite reconnect (was max 10), max delay 30s -> 5min + jitter, factor 1.5
-
-### Fixed
-- `user-agents.js`: Chrome 131-133 -> 139-141 (Oct 2026 stable), added Linux, `windowsUserAgent` export for GoatBot compat
-- `setOptions` default UA Chrome 131 -> 141
-- `ctx.lsd`/`ctx.master`/`ctx.jazoest` now populated so `utils.getHeaders` sends real `X-Fb-Lsd`/`X-Fb-Spin-*`
-- `sendTypingIndicatorV2` alias, `fbDtsgRefreshMs` configurable via globalOptions
 
 ## [3.4.0] - 2026-01-18 - ⚡ PERFORMANCE REVOLUTION
 

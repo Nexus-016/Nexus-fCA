@@ -69,22 +69,38 @@ module.exports = function (defaultFuncs, api, ctx) {
 // Robust fallback logic
 async function fallbackRefresh(ctx, callback, resolve, reject) {
     const sources = [
-        { url: "https://www.facebook.com/", label: "facebook.com" },
-        { url: "https://mbasic.facebook.com/", label: "mbasic.facebook.com" },
-        { url: "https://business.facebook.com/", label: "business.facebook.com" }
+        { url: "https://www.facebook.com/", label: "facebook.com", proofTrusted: true },
+        { url: "https://mbasic.facebook.com/", label: "mbasic.facebook.com", proofTrusted: false },
+        { url: "https://business.facebook.com/", label: "business.facebook.com", proofTrusted: false }
     ];
 
     let lastErr = null;
+    let sawSessionExpired = false;
     for (const source of sources) {
         try {
             const resData = await utils.get(source.url, ctx.jar, null, ctx.globalOptions, { noRef: true });
             const html = resData.body;
 
-             if (html && (html.includes("login_form") || html.includes("/login.php"))) {
-                 log.warn("refreshFb_dtsg", `Session expired detected from ${source.label}`);
-                 lastErr = new utils.CustomError("Session expired - login required");
-                 continue;
-             }
+            // Dead-session check, evidence-based: the logged-in home page
+            // embeds the account id (ctx.userID) in its bootstrap data; a
+            // logged-out page does not. On www.facebook.com that embedding
+            // is reliable (proofTrusted), so a missing id alone means the
+            // session is gone even if no login form is rendered. On other
+            // sources only an explicit login form counts. A bare
+            // "/login.php" substring is NOT evidence — logged-in pages
+            // embed login.php URLs in their prefetch config.
+            if (html) {
+                const proof = ctx.userID && html.includes(String(ctx.userID));
+                const strongLoginForm =
+                    (/<form[^>]+action="[^"]*login[^"]*"/i.test(html) && html.includes('name="pass"')) ||
+                    html.includes('id="login_form"');
+                if (!proof && (strongLoginForm || source.proofTrusted)) {
+                    log.warn("refreshFb_dtsg", `Session expired detected from ${source.label}`);
+                    sawSessionExpired = true;
+                    lastErr = new utils.CustomError("Session expired - login required");
+                    continue;
+                }
+            }
 
             // Try getFrom extraction with various patterns
             let fb_dtsg = utils.getFrom(html, 'name="fb_dtsg" value="', '"') ||
@@ -130,12 +146,17 @@ async function fallbackRefresh(ctx, callback, resolve, reject) {
     // login form) and auto-login could not revive it, restart the process so
     // the hosting platform (Koyeb/Railway/Render) re-runs login with the latest
     // cookie-refresher-saved appstate.json instead of leaving a zombie bot.
-    const deathMessage = String(lastErr && lastErr.message || "");
-    if (!autoLoginOk && /session expired/i.test(deathMessage) && !global.__NEXUS_SESSION_RECOVERY__) {
+    if (!autoLoginOk && sawSessionExpired && !global.__NEXUS_SESSION_RECOVERY__) {
         global.__NEXUS_SESSION_RECOVERY__ = true;
         log.error("refreshFb_dtsg", "Session expired and auto-login did not recover it. Restarting the bot process in 15 seconds so it can re-login with the latest refreshed appstate.");
         setTimeout(() => process.exit(1), 15000);
     }
 
+    // Prefer a session-expired error when the dead-check fired, so callers
+    // (and the ACCOUNT_LOCK guard) see the real state instead of a generic
+    // "could not find fb_dtsg" message left by a later source.
+    if (sawSessionExpired && !(lastErr && /session expired/i.test(String(lastErr.message || "")))) {
+        lastErr = new utils.CustomError("Session expired - login required");
+    }
     callback(lastErr || new utils.CustomError("Could not find fb_dtsg in any fallback HTML sources."));
 }

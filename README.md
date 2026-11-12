@@ -2,10 +2,35 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v4.4.0
+# Nexus-FCA v4.4.1
 
 > Advanced, hardened, and massive-load-ready Facebook Messenger API for Node.js.
 > UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
+
+---
+
+## What's New in v4.4.1
+
+**Session stability hotfix** — three production-blocking session bugs fixed and verified against live Facebook traffic.
+
+**Evidence-Based Login Validation**
+- A session is proven alive by the account's `c_user`/`i_user` id appearing in the page bootstrap — not by substring guesses that logged-in pages also contain (escaped `login.php` URLs are part of every home page's prefetch config).
+- A suspicious page is confirmed once against `home.php` before it is declared dead; checkpoint markers stay decisive.
+- Fresh cookies log in reliably; corrupted cookies still route into the anti-lock guard with the typed lock patterns.
+
+**MQTT Broker Compatibility**
+- The edge-chat broker answers QoS-1 publishes with MQTT5-style PUBACK header bytes, which the standard parser rejects (`Invalid header flag bits, must be 0x0 for puback packet`) — ending the session right after queue creation.
+- Incoming WebSocket frames are normalized in the stream bridge: non-compliant PUBACKs are rewritten in place (flags cleared, a present reason code stripped); compliant packets pass through untouched, zero-copy.
+- QoS-1 sends stay stable mid-session: messages, reactions and mark-as-read all publish with QoS-1.
+
+**Cookie Refresher Correctness**
+- Refresh requests use the same request shape as login (a plain page GET) instead of an API-shaped request that Facebook answers with error 1357004 in a ~250-byte async wrapper.
+- Success is detected by the account id in the page body, not by the presence of Set-Cookie headers — Facebook sends none while every cookie is still valid.
+- Expiry extension and backups now actually run; healthy sessions no longer report "All refresh URLs failed".
+
+**Diagnostics & Hygiene**
+- A full login boot logs zero warnings (a known object-export module is skipped silently).
+- `appStatePath` / `appstatePath` option spellings are both accepted end-to-end.
 
 ---
 
@@ -318,6 +343,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **4.4.1** | Session stability hotfix: evidence-based login validation, MQTT broker PUBACK compatibility, cookie refresher correctness, zero-warning boot |
 | **4.4.0** | Production hardening: UA fingerprint lock, login-time dead-cookie guard, CookieRefresher wiring, massive-load protections (group queue/circuit breaker/TTL sweeps), sqlite WAL, deps modernized (mqtt 5.16 / uuid 11 / ws 8.22) |
 | 4.3.x | E2EE bridge (BETA), storyManager, stickerStore, OldMessage fallback, createThemeAI endpoint fix, autoLogin subsystem, theme/sticker/friend APIs |
 | 4.2.0 | Safety hardening: fingerprint-lock default, expanded DTSG extraction |

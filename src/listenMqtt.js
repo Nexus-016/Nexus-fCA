@@ -385,6 +385,68 @@ function buildProxy() {
 
   return Proxy;
 }
+/**
+ * NEXUS FIX (MQTT broker compat):
+ * Facebook's edge-chat broker now replies to QoS-1 PUBLISHes with MQTT5-style
+ * PUBACK header bytes (0x42 = PUBACK with the reason-code flag set) even on
+ * our MQTT 3.1 connection. The mqtt-packet parser enforces flags == 0x0 for
+ * PUBACK, so those replies throw "Invalid header flag bits, must be 0x0 for
+ * puback packet" and killed the whole session right after the queue-create
+ * publish (and any QoS-1 send: messages, reactions, mark-as-read...).
+ *
+ * Normalizes incoming WS buffers by walking the MQTT frames they contain
+ * (per the MQTT-over-WebSocket spec each WS message holds complete packets,
+ * packets never span messages) and rewrites non-compliant PUBACKs:
+ *   * flags set, payload = packet id only (observed live: 42 02 XX XX)
+ *     -> clear the flag bits in place (payload layout already matches).
+ *   * flags == 0x02 with a reason code (remaining length 3)
+ *     -> clear flags and drop the reason byte so a 3.1 parser stays in sync.
+ * Compliant packets pass through untouched (zero copy).
+ */
+function normalizeBrokerMqttPackets(input) {
+  const buf = Buffer.isBuffer(input) ? input : Buffer.from(input);
+  const total = buf.length;
+  if (total < 2) return buf;
+  const pieces = [];
+  let i = 0;
+  let modified = false;
+  while (i < total) {
+    const header = buf[i];
+    const cmd = header >> 4;
+    // remaining length varint (1-4 bytes)
+    let value = 0;
+    let multiplier = 1;
+    let j = i + 1;
+    while (j < total) {
+      const b = buf[j];
+      value += (b & 0x7f) * multiplier;
+      multiplier *= 128;
+      j += 1;
+      if ((b & 0x80) === 0) break;
+      if (j - i > 4) return buf; // malformed varint — leave the buffer untouched
+    }
+    const frameEnd = j + value;
+    if (frameEnd > total) return buf; // incomplete frame — leave as-is
+    const flags = header & 0x0f;
+    if (cmd === 4 && flags !== 0 && value === 2) {
+      // PUBACK with flags + packet-id-only payload (Facebook's live format)
+      pieces.push(Buffer.from([header & 0xf0]));
+      pieces.push(buf.subarray(i + 1, frameEnd));
+      modified = true;
+    } else if (cmd === 4 && flags === 0x02 && value === 3) {
+      // PUBACK with a reason code — strip it for the 3.1 parser
+      pieces.push(Buffer.from([header & 0xf0, 0x02]));
+      pieces.push(buf.subarray(i + 2, i + 4));
+      modified = true;
+    } else {
+      pieces.push(buf.subarray(i, frameEnd));
+    }
+    i = frameEnd;
+  }
+  if (!modified) return buf;
+  return Buffer.concat(pieces);
+}
+
 function buildStream(options, WebSocket, Proxy) {
   const Stream = Duplexify(undefined, undefined, options);
   Stream.socket = WebSocket;
@@ -409,7 +471,7 @@ function buildStream(options, WebSocket, Proxy) {
       event.data instanceof ArrayBuffer
         ? Buffer.from(event.data)
         : Buffer.from(event.data, "utf8");
-    Stream.push(data);
+    Stream.push(normalizeBrokerMqttPackets(data));
   };
   WebSocket.onopen = () => {
     Stream.setReadable(Proxy);

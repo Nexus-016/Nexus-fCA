@@ -7,3 +7,5 @@ index.js.backup
 .npmrc
 Fca_Database/
 *.db-journal
+appstate_refreshed_*.json
+session.lock
