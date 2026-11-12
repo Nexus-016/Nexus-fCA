@@ -4,6 +4,11 @@
 
 # Nexus-FCA v4.4.1
 
+[![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
+[![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE-MIT)
+[![GitHub](https://img.shields.io/badge/github-Nexus--016%2FNexus--fCA-blue)](https://github.com/Nexus-016/Nexus-fCA)
+
 > Advanced, hardened, and massive-load-ready Facebook Messenger API for Node.js.
 > UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
 
