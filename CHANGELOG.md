@@ -1,5 +1,17 @@
 # Changelog
 
+## [5.0.5] - 2026-11-15 - 🔎 HIDDEN-ISSUE AUDIT (COOKIE / ACCOUNT / STABILITY / PERFORMANCE)
+
+Full audit of the cookie-death, account-safety, GoatBot V2 compatibility, stability and performance surfaces, with fixes for everything found.
+
+### Fixed
+- **`api.getUID` is now fully local**: the previous implementation posted every profile link to a third-party resolver (`id.traodoisub.com`), leaking the bot's browsing targets and adding a third-party point of failure — and its fallback path was dead code that called a non-existent `utils.error` helper (the catch block itself threw). The rewritten resolver: returns ids already present in the link (`profile.php?id=`, numeric paths, bare numeric input) without any request; resolves vanity links by fetching the profile page **through the bot's own session** (same UA + cookies as every other request — fingerprint stays consistent, nothing leaves the machine); detects a login-page response and reports it as a session problem instead of a generic failure. Clean callback/promise contract preserved.
+- **Performance — appstate auto-persist throttled**: busy sessions receive `Set-Cookie` on most responses and the auto-persist performed a synchronous `writeFileSync` per response on the hot request path. Saves are now coalesced to at most one write per 10 seconds with a trailing flush, so the latest cookie state still lands on disk. The safety gate (never overwrite the session file with a set missing `c_user`/`xs`) is unchanged.
+- **Stability — CookieRefresher retry timer no longer holds the process open**: the 15-minute retry `setTimeout` after a failed refresh is now unref'd, like the main refresh timer.
+
+### Verified
+- 55-check upstream-compat suite (8 sections, new section covers getUID local resolution + the save throttle), 34-check regression suite, 14-check contract suite — all green in both copies.
+
 ## [5.0.4] - 2026-11-14 - ✨ ADVANCED PARITY (LOCAL)
 
 Reviewed `neokex-fca`'s advanced feature set at the user's request and brought the genuinely useful ones into Nexus-fCA — **implemented locally**, unlike neokex which is a thin client that uploads every cookie and every call to its own server (`fca.neokex.xyz`).

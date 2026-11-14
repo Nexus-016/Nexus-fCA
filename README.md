@@ -2,7 +2,7 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v5.0.4 — GOAT Update
+# Nexus-FCA v5.0.5 — GOAT Update
 
 [![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
 [![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
@@ -13,6 +13,12 @@
 > Full GoatBot V2 compatibility, cookie jar integrity, session-file protection, UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
 
 ---
+
+## What's New in v5.0.5 (Hidden-Issue Audit)
+
+- **`api.getUID` fully local**: resolves profile links without any third-party service — ids in the link (`profile.php?id=`, numeric paths) return instantly, vanity links are fetched through the bot's own session and parsed locally. A login-page response is reported as a session problem.
+- **Performance**: appstate auto-persist throttled to at most one disk write per 10 seconds (busy sessions used to write on every `Set-Cookie` response).
+- **Stability**: CookieRefresher's retry timer no longer holds the process open.
 
 ## What's New in v5.0.4 (Advanced Parity — Local)
 
@@ -398,6 +404,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **5.0.5** | Hidden-issue audit: fully-local `getUID` (third-party resolver removed), throttled appstate auto-persist, CookieRefresher timer hygiene |
 | **5.0.4** | Advanced parity: local cookie-liveness probe (`login.utils.checkLiveCookie`), device identifiers, live listener options |
 | **5.0.3** | Full GoatBot V2 surface audit: appState input normalization (cookie strings, `{name}` exports), string IDs in task acks, tolerant sendMessage reply target |
 | **5.0.2** | Upstream main-framework sync: m_basic device-mode fix, MPageLoadClientMetrics UA fallback, live-interstitial handling |

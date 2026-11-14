@@ -1671,9 +1671,26 @@ function saveCookies(jar, ctx) {
             }
         });
 
-        // AUTO-PERSISTENCE: If ctx has appStatePath, save to disk immediately
+        // AUTO-PERSISTENCE: persist cookie changes when the session file
+        // path is known. Throttled: busy sessions receive Set-Cookie on
+        // most responses and a synchronous write per response wastes disk
+        // I/O on the hot request path, so at most one write happens per
+        // 10 seconds, with a trailing flush so the latest cookie state
+        // still lands on disk.
         if (ctx && ctx.appStatePath) {
-            saveAppState(ctx);
+            const now = Date.now();
+            const last = ctx._appStateSavedAt || 0;
+            if (now - last >= 10000) {
+                ctx._appStateSavedAt = now;
+                saveAppState(ctx);
+            } else if (!ctx._appStateSaveTimer) {
+                ctx._appStateSaveTimer = setTimeout(function () {
+                    ctx._appStateSaveTimer = null;
+                    ctx._appStateSavedAt = Date.now();
+                    saveAppState(ctx);
+                }, 10000 - (now - last));
+                if (typeof ctx._appStateSaveTimer.unref === "function") ctx._appStateSaveTimer.unref();
+            }
         }
 
         return res;
@@ -1696,6 +1713,7 @@ function saveAppState(ctx) {
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
         fs.writeFileSync(ctx.appStatePath, JSON.stringify(appState, null, 2));
+        ctx._appStateSavedAt = Date.now();
 
         // Optional: Mirror to environment-ready file for cloud platforms
         const envPath = ctx.appStatePath.replace('.json', '.env.json');
