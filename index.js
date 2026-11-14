@@ -607,6 +607,14 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
         const maxBackups = toInt(process.env.NEXUS_COOKIE_MAX_BACKUPS, 5);
         const backupsEnabled = process.env.NEXUS_COOKIE_BACKUP_ENABLED ? envBool(process.env.NEXUS_COOKIE_BACKUP_ENABLED) : true;
 
+        // Retire any refresher from a previous login in this process first:
+        // its timers would otherwise keep firing with the old (possibly
+        // dead) jar and could overwrite the new session's appstate file.
+        if (global.__NEXUS_COOKIE_REFRESHER__ && typeof global.__NEXUS_COOKIE_REFRESHER__.dispose === 'function') {
+          global.__NEXUS_COOKIE_REFRESHER__.dispose();
+          logger('♻️ Previous cookie refresher disposed (re-login)', 'debug');
+        }
+
         const cookieRefresher = new CookieRefresher({
           enabled: refreshEnabled,
           cookieRefreshIntervalMs: refreshInterval,
@@ -633,11 +641,15 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
 
           // NEXUS STABILITY: don't hit Facebook seconds after login — the login
           // GET itself is fresh traffic. First refresh lands 2-4 min later.
-          setTimeout(() => {
+          // The handle is stored on the refresher (and unref'd) so a re-login
+          // can cancel the pending first refresh via dispose().
+          cookieRefresher._initialTimer = setTimeout(() => {
+            cookieRefresher._initialTimer = null;
             cookieRefresher.refreshNow().catch(err => {
               logger(`❌ Initial cookie refresh failed: ${err.message}`, 'warn');
             });
           }, 2 * 60 * 1000 + Math.floor(Math.random() * 2 * 60 * 1000));
+          if (typeof cookieRefresher._initialTimer.unref === 'function') cookieRefresher._initialTimer.unref();
         }
       } catch (err) {
         logger(`❌ Cookie Refresher initialization failed: ${err.message}`, 'error');

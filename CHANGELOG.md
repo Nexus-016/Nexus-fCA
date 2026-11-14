@@ -1,5 +1,17 @@
 # Changelog
 
+## [5.0.6] - 2026-11-15 - 🧠 SENIOR-LEVEL DEEP AUDIT (ROUND 2)
+
+Second, deeper audit pass over the crash/corruption/leak classes the first pass could not reach.
+
+### Fixed
+- **Data corruption — atomic appstate writes**: a process killed mid-write (host restart, crash, `process.exit`) could leave a truncated `appstate.json`, which breaks the next login until the user re-exports cookies. Both `saveAppState` and the CookieRefresher's save now write to a temp file and rename, with a copy fallback for platforms that refuse renames.
+- **Silent no-op session refresh (`refreshFb_dtsg`)**: any non-empty `obj` argument was treated as session data — callers passing `{ signal }` for timeout protection got a **fake success**, the signal was assigned onto `ctx` (pollution), and no actual refresh happened. The refresh now separates the optional abort signal from real data keys: a `{ signal }` call performs the full refresh, the signal is honored (settles early with the abort reason), a hanging fetch no longer blocks, and the callback is guaranteed to settle exactly once.
+- **Relogin timer leak (CookieRefresher)**: a new refresher is created per login but the previous instance was never retired — its 6h timer (and the 2-4 min initial refresh) could later fire with the old, possibly dead jar and overwrite the new session's appstate file (complete-but-dead `c_user`/`xs` passes the completeness gate). Added `dispose()` (stops all timers, makes refresh/save permanent no-ops); the login flow now disposes the previous refresher and stores + unrefs the initial-refresh handle so a re-login cancels it.
+
+### Verified
+- 66-check upstream-compat suite (9 sections; new section covers the `{signal}` semantics, abort handling, once-guard, disposal, and atomic writes), 34-check regression suite, 14-check contract suite — all green in both copies.
+
 ## [5.0.5] - 2026-11-15 - 🔎 HIDDEN-ISSUE AUDIT (COOKIE / ACCOUNT / STABILITY / PERFORMANCE)
 
 Full audit of the cookie-death, account-safety, GoatBot V2 compatibility, stability and performance surfaces, with fixes for everything found.

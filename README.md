@@ -2,7 +2,7 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v5.0.5 — GOAT Update
+# Nexus-FCA v5.0.6 — GOAT Update
 
 [![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
 [![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
@@ -13,6 +13,12 @@
 > Full GoatBot V2 compatibility, cookie jar integrity, session-file protection, UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
 
 ---
+
+## What's New in v5.0.6 (Deep Audit)
+
+- **Atomic appstate writes**: crash mid-write can no longer leave a truncated session file (write-to-temp + rename).
+- **`refreshFb_dtsg` fixed**: `{ signal }` callers get a real refresh now (previously a fake success that polluted `ctx`); abort signals are honored and the callback settles exactly once.
+- **Relogin hygiene**: the previous CookieRefresher is disposed on re-login so its stale timers can never overwrite the new session's cookies.
 
 ## What's New in v5.0.5 (Hidden-Issue Audit)
 
@@ -404,6 +410,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **5.0.6** | Deep audit: atomic appstate writes (crash-proof), real `{signal}` refresh semantics, CookieRefresher disposal on re-login |
 | **5.0.5** | Hidden-issue audit: fully-local `getUID` (third-party resolver removed), throttled appstate auto-persist, CookieRefresher timer hygiene |
 | **5.0.4** | Advanced parity: local cookie-liveness probe (`login.utils.checkLiveCookie`), device identifiers, live listener options |
 | **5.0.3** | Full GoatBot V2 surface audit: appState input normalization (cookie strings, `{name}` exports), string IDs in task acks, tolerant sendMessage reply target |

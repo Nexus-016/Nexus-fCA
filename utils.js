@@ -1712,7 +1712,24 @@ function saveAppState(ctx) {
         const dir = path.dirname(ctx.appStatePath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-        fs.writeFileSync(ctx.appStatePath, JSON.stringify(appState, null, 2));
+        // Atomic write: a process killed mid-write (host restart, crash,
+        // process.exit) must never leave a truncated appstate.json — that
+        // would break the next login until the user re-exports cookies.
+        // Write to a temp file and rename, falling back to a direct write
+        // if the platform refuses the rename.
+        const tmpPath = ctx.appStatePath + '.tmp';
+        const payload = JSON.stringify(appState, null, 2);
+        try {
+            fs.writeFileSync(tmpPath, payload);
+            try {
+                fs.renameSync(tmpPath, ctx.appStatePath);
+            } catch (renameErr) {
+                fs.copyFileSync(tmpPath, ctx.appStatePath);
+                try { fs.unlinkSync(tmpPath); } catch (_) { }
+            }
+        } catch (writeErr) {
+            fs.writeFileSync(ctx.appStatePath, payload);
+        }
         ctx._appStateSavedAt = Date.now();
 
         // Optional: Mirror to environment-ready file for cloud platforms

@@ -15,52 +15,82 @@ module.exports = function (defaultFuncs, api, ctx) {
       callback = obj;
       obj = {};
     }
-    if (!obj) obj = {};
+    if (!obj || typeof obj !== "object") obj = {};
 
     if (!callback) {
       callback = (err, data) => (err ? rejectFunc(err) : resolveFunc(data));
     }
 
-    if (Object.keys(obj).length === 0) {
-      // Primary: simple and robust method first
+    // An optional AbortSignal may be passed for timeout protection
+    // (FacebookSafety passes { signal }). It is NOT session data: the old
+    // behavior treated ANY non-empty obj as data — it assigned the signal
+    // onto ctx, reported a fake success, and never actually refreshed
+    // anything.
+    const signal = obj.signal && typeof obj.signal.addEventListener === "function" ? obj.signal : null;
+    const data = {};
+    for (const k of Object.keys(obj)) {
+      if (k !== "signal") data[k] = obj[k];
+    }
+
+    // Guard so the callback (and the abort race) can never settle twice.
+    let settled = false;
+    const finish = (err, payload) => {
+      if (settled) return;
+      settled = true;
+      callback(err, payload);
+    };
+
+    if (Object.keys(data).length === 0) {
       utils.get("https://www.facebook.com/", ctx.jar, null, ctx.globalOptions, { noRef: true })
         .then(res => {
           const html = res.body;
           // Extraction patterns
           const fb_dtsg = utils.getFrom(html, '["DTSGInitData",[],{"token":"', '","') ||
                           utils.getFrom(html, '"DTSGInitData",[],{"token":"', '","');
-          
+
           const jazoest = utils.getFrom(html, 'jazoest=', '",') ||
                           utils.getFrom(html, 'name="jazoest" value="', '"');
-          
-          const lsd = utils.getFrom(html, "[\"LSD\",[],{\"token\":\"", "\",");
+
+          const lsd = utils.getFrom(html, '["LSD",[],{"token":"', '",');
 
           if (fb_dtsg) {
             ctx.fb_dtsg = fb_dtsg;
             if (jazoest) ctx.jazoest = jazoest;
             if (lsd) ctx.lsd = lsd;
-            
+
             log.info("refreshFb_dtsg", "✅ Token refreshed via www.facebook.com (primary)");
-            callback(null, {
+            finish(null, {
                 data: { fb_dtsg: ctx.fb_dtsg, jazoest: ctx.jazoest, lsd: ctx.lsd },
                 message: "Refreshed fb_dtsg via www.facebook.com"
             });
           } else {
              // Fallback to legacy loop if primary fails
-             return fallbackRefresh(ctx, callback, resolveFunc, rejectFunc);
+             return fallbackRefresh(ctx, finish, resolveFunc, rejectFunc);
           }
         })
         .catch(err => {
            log.warn("refreshFb_dtsg", "Primary fetch failed, trying fallbacks...", err);
-           fallbackRefresh(ctx, callback, resolveFunc, rejectFunc);
+           return fallbackRefresh(ctx, finish, resolveFunc, rejectFunc);
         });
-    } else {
-      Object.assign(ctx, obj);
-      callback(null, {
-        data: obj,
-        message: "Refreshed " + Object.keys(obj).join(", "),
-      });
+
+      if (signal) {
+        // Honor the caller's abort signal: settle early (with the abort
+        // reason) instead of hanging for the full network timeout.
+        signal.addEventListener("abort", () => {
+          const reason = signal.reason instanceof Error ? signal.reason : new Error("refreshFb_dtsg aborted by signal");
+          finish(reason);
+        });
+      }
+      return returnPromise;
     }
+
+    // Explicit data override (previous contract): assign only real data,
+    // never the signal.
+    Object.assign(ctx, data);
+    finish(null, {
+      data: data,
+      message: "Refreshed " + Object.keys(data).join(", "),
+    });
 
     return returnPromise;
   };
