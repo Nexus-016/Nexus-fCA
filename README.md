@@ -2,7 +2,7 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v5.0.3 — GOAT Update
+# Nexus-FCA v5.0.4 — GOAT Update
 
 [![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
 [![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
@@ -13,6 +13,14 @@
 > Full GoatBot V2 compatibility, cookie jar integrity, session-file protection, UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
 
 ---
+
+## What's New in v5.0.4 (Advanced Parity — Local)
+
+- **`login.utils.checkLiveCookie(input)`**: sessionless cookie liveness probe — accepts a cookie array, a raw cookie string, cookies.txt or a jar; returns `{ live, accountID, reason, checkedAt }`. Runs locally, nothing uploaded.
+- **`api.getDeviceIdentifiers()`**: stable `{ deviceID, familyDeviceID, machineID }` persisted next to the account's appstate.
+- **`api.setListenerOptions()` / `api.getListenerOptions()`**: live listener-option updates.
+
+> Why this matters: other "advanced" FCAs ship a thin client that uploads your cookies to their server (`fca.neokex.xyz`) and runs every feature — even basic sends — remotely. Nexus-fCA keeps your session on your machine: cookies never leave it.
 
 ## What's New in v5.0.3 (Full GoatBot V2 Surface Audit)
 
@@ -390,6 +398,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **5.0.4** | Advanced parity: local cookie-liveness probe (`login.utils.checkLiveCookie`), device identifiers, live listener options |
 | **5.0.3** | Full GoatBot V2 surface audit: appState input normalization (cookie strings, `{name}` exports), string IDs in task acks, tolerant sendMessage reply target |
 | **5.0.2** | Upstream main-framework sync: m_basic device-mode fix, MPageLoadClientMetrics UA fallback, live-interstitial handling |
 | **5.0.1** | GoatBot V2 contract hotfix: canonical relogin error strings, `api.stopListening`, evidence-based mbasic dead-check |

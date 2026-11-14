@@ -1978,9 +1978,19 @@ function cleanHTML(text) {
     return text;
 }
 
-function checkLiveCookie(ctx, defaultFuncs) {
-    return defaultFuncs.get("https://m.facebook.com/me", ctx.jar).then(function (res) {
-        if (res.body.indexOf(ctx.userID) === -1) {
+function checkLiveCookie(ctxOrInput, defaultFuncs) {
+    // SESSIONLESS liveness probe (neokex-fca `login.utils.checkLiveCookie`
+    // parity, implemented locally — cookies never leave this machine):
+    // accepts an exported cookie array, a raw cookie string, cookies.txt
+    // (Netscape) or a jar-like object, and reports whether the set still
+    // authenticates, without creating a session or writing anything.
+    if (defaultFuncs === undefined) {
+        return require("./lib/safety/cookieLiveness").checkLiveCookie(ctxOrInput);
+    }
+    // Legacy session-based check (used internally by the listener): requires
+    // an active (ctx, defaultFuncs) pair.
+    return defaultFuncs.get("https://m.facebook.com/me", ctxOrInput.jar).then(function (res) {
+        if (res.body.indexOf(ctxOrInput.userID) === -1) {
             throw new CustomError({
                 message: "Not logged in.",
                 error: "Not logged in."

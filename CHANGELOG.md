@@ -1,5 +1,20 @@
 # Changelog
 
+## [5.0.4] - 2026-11-14 - ✨ ADVANCED PARITY (LOCAL)
+
+Reviewed `neokex-fca`'s advanced feature set at the user's request and brought the genuinely useful ones into Nexus-fCA — **implemented locally**, unlike neokex which is a thin client that uploads every cookie and every call to its own server (`fca.neokex.xyz`).
+
+### Added
+- **`login.utils.checkLiveCookie(input, options)` (sessionless liveness probe)**: checks whether a cookie set still authenticates without creating a session and without writing anything — accepts an exported cookie array, a raw cookie string (`"c_user=...; xs=...;"`), a cookies.txt (Netscape) export, or a jar-like object; returns `{ live, accountID, reason, checkedAt }`. Evidence-based (account id + settings markup = live; a real login form = dead). Implemented locally — the cookies never leave the machine. The existing session-based `checkLiveCookie(ctx, defaultFuncs)` keeps its signature (used internally by the listener) via smart dispatch.
+- **`api.getDeviceIdentifiers()`**: the device identity the session presents — `{ deviceID, familyDeviceID, machineID }`, persisted next to the account's `appstate.json` so the fingerprint is stable across restarts. `machineID` is a stable sha256 fingerprint of the device profile.
+- **`api.setListenerOptions(options)` / `api.getListenerOptions()`**: update/read the listener option subset live (`selfListen`, `selfListenEvent`, `listenEvents`, `listenTyping`, `updatePresence`, `autoMarkDelivery`, `autoMarkRead`, `autoReconnect`, `online`, `emitReady`); returns `{ updated: string[] }`.
+
+### Note on neokex-fca
+Its "advanced" features (music stickers, effects, bump) live in a closed server engine — the published npm client contains only API metadata and uploads the user's appState to `fca.neokex.xyz` in `POST /v1/sessions`, then proxies every call. Nexus-fCA keeps every session local: cookies, listeners and features all run on the user's own machine. Its locally-listed extras (`listEffects`/`listAvatarEffects`) also resolve from the server manifest, not from the client.
+
+### Verified
+- 45-check upstream-compat suite (now covering the advanced parity surface), 34-check regression suite, 14-check contract suite — all green.
+
 ## [5.0.3] - 2026-11-14 - 🧩 FULL GOATBOT V2 SURFACE AUDIT
 
 Completed the full surface audit the earlier audits only sampled: every API method the upstream main GoatBot V2 FCA exposes, every event type the bot's handlerAction dispatches, and the dev-user input shapes the upstream FCA accepts.
