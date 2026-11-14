@@ -2,7 +2,7 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v5.0.1 — GOAT Update
+# Nexus-FCA v5.0.2 — GOAT Update
 
 [![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
 [![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
@@ -13,6 +13,14 @@
 > Full GoatBot V2 compatibility, cookie jar integrity, session-file protection, UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
 
 ---
+
+## What's New in v5.0.2 (Upstream Main-Framework Sync)
+
+Synced the login chain with the upstream main GoatBot V2 framework (its final `1.5.35` "fix: fca not working" commit):
+
+- **m_basic device-mode fix**: Facebook's "This browser is not supported" interstitial on datacenter IPs (Koyeb/Railway) is now followed via its embedded `gfid` device-switch link, restoring a parseable home page (fb_dtsg + MQTT endpoint/region) and a working listener.
+- **MPageLoadClientMetrics UA fallback**: one iPhone-UA refetch when the home page lacks the region/seqID bootstrap marker; the pinned session UA is untouched.
+- **Live interstitials are not dead sessions**: the login-time evidence check no longer declares the browser-not-supported page dead — real login forms and checkpoint markers remain the decisive signals.
 
 ## What's New in v5.0.1 (GoatBot Contract Hotfix)
 
@@ -375,6 +383,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **5.0.2** | Upstream main-framework sync: m_basic device-mode fix, MPageLoadClientMetrics UA fallback, live-interstitial handling |
 | **5.0.1** | GoatBot V2 contract hotfix: canonical relogin error strings, `api.stopListening`, evidence-based mbasic dead-check |
 | **5.0.0** | 🐐 GOAT Update: full GoatBot V2 compatibility audit, cookie jar integrity (poisoning crash fixed), session-file protection, clean upload errors, logger correctness |
 | **4.4.1** | Session stability hotfix: evidence-based login validation, MQTT broker PUBACK compatibility, cookie refresher correctness, zero-warning boot |

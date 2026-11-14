@@ -1,5 +1,21 @@
 # Changelog
 
+## [5.0.2] - 2026-11-14 - 🔗 UPSTREAM MAIN-FRAMEWORK SYNC
+
+Re-audited the changed Goat-X-Nexus bot framework and synced the login chain with the upstream main GoatBot V2 framework (its final `1.5.35` "fix: fca not working" commit), which fixed two login-time failure modes on datacenter hosting.
+
+### Added
+- **m_basic device-mode fix (login chain)**: Facebook serves a "This browser is not supported" interstitial to logged-in sessions on datacenter IPs (Koyeb/Railway). It embeds a `gfid` for the m_basic device-switch link; following that link flips the session to m_basic device mode so the home page serves bootstrap markup that `buildAPI` can parse (fb_dtsg + MQTT endpoint/region). Without it, the page yielded no fb_dtsg, the graphqlbatch SeqID fetch failed and the listener never came up. Runs in the upstream order: redirect → device fix → MPageLoadClientMetrics UA fallback → redirect → device fix.
+- **MPageLoadClientMetrics UA fallback**: a desktop-UA fetch of the home page can lack `MPageLoadClientMetrics` (the bootstrap marker exposing region/seqID). One refetch with an iPhone UA restores it. The pinned session UA is untouched (request-local copy), and every step is best-effort — network failures pass through without failing the login.
+
+### Fixed
+- **Browser-not-supported interstitial no longer declared dead**: the login-time dead-session evidence check treated the interstitial as "no account proof" and threw before the device-mode recovery could run. It is a LIVE-session interstitial, so it now returns the response untouched and lets the recovery chain handle it (dead sessions still throw on real login forms, and checkpoint markers remain decisive).
+
+### Verified against the changed bot framework + upstream
+- The bot's new listener-callback contract is fully satisfied: exact relogin strings (`"Not logged in"` / `"Not logged in."` / `"Connection refused: Server unavailable"`), `api.stopListening(cb)` before every relisten, `event.messageID` loop detection, whitelist `senderID`/`userID`/`threadID` fields — all present.
+- The bot's new messageID-type-tolerant reply lookup works with our listener (messageIDs emitted as strings; the bot's new tolerant lookup also accepts numbers defensively).
+- 23-check upstream-compat suite, 14-check contract suite and 34-check regression suite all green.
+
 ## [5.0.1] - 2026-11-14 - 🔗 GOATBOT V2 CONTRACT HOTFIX
 
 Audited the GoatBot V2 framework end-to-end (its real login flow, listener callback and error handling) and fixed three contract mismatches that made the bot freeze or duplicate listeners instead of relogging in.
