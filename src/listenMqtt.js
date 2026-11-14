@@ -62,9 +62,19 @@ async function getSeqIdFromMbasic(defaultFuncs, ctx) {
       throw new Error("Empty response from mbasic");
     }
     
-    // Check if we're logged in on mbasic
-    if (res.body.includes('login') && res.body.includes('password')) {
-      throw new Error("Not logged in on mbasic");
+    // Check if we're logged in on mbasic.
+    // NEXUS FIX: evidence-based — logged-in mbasic pages also embed escaped
+    // login.php URLs and password-field markup in their prefetch/bootstrap
+    // config, so bare "login"/"password" substrings false-positived and
+    // killed healthy SeqID fallbacks (same bug class as the 4.4.1 login
+    // false-positive). Alive = this account's id present in the page; a
+    // real password form without proof is the only dead signal.
+    const proof = !!(ctx && ctx.userID && res.body.includes(String(ctx.userID)));
+    if (!proof) {
+      const hasRealForm = /<form[^>]+action="[^"]*login[^"]*"/i.test(res.body) && res.body.includes('name="password"');
+      if (hasRealForm) {
+        throw new Error("Not logged in on mbasic");
+      }
     }
     
     // Generate a synthetic seqId based on timestamp
@@ -752,14 +762,19 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
           .catch((e) => {
             log.error("listenMqtt", `Auto-recovery failed: ${e.message}`);
             ctx.loggedIn = false;
-            // Fall through to globalCallback
-            globalCallback({ type: "not_logged_in", error: errMsg });
+            // Fall through to globalCallback.
+            // GoatBot V2 contract: its relogin/restart logic matches the
+            // literal string `error.error == "Not logged in."` — a custom
+            // message here made the bot ignore the dead session and freeze
+            // instead of relogging in. The raw detail travels in `message`
+            // (the bot's lock detector reads it too).
+            globalCallback({ type: "not_logged_in", error: "Not logged in.", message: errMsg });
           });
         return; // Stop here, wait for promise
       }
       
       ctx.loggedIn = false;
-      return globalCallback({ type: "not_logged_in", error: errMsg });
+      return globalCallback({ type: "not_logged_in", error: "Not logged in.", message: errMsg });
     }
 
     if (ctx.globalOptions.autoReconnect) {
@@ -797,15 +812,17 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
                     log.error("listenMqtt", `Token refresh failed: ${refreshErr.message || refreshErr}`);
                     ctx.loggedIn = false;
                     ctx._attemptingRecovery = false;
-                    // NOW we abort
-                    return globalCallback({ type: "not_logged_in", error: "Not logged in (Auto-recovery failed)" });
+                    // NOW we abort. Canonical "Not logged in." per the
+                    // GoatBot V2 relogin contract (exact string match);
+                    // the detail rides in `message`.
+                    return globalCallback({ type: "not_logged_in", error: "Not logged in.", message: "Not logged in (auto-recovery failed): " + (refreshErr.message || refreshErr) });
                  });
                return; // Stop execution here, wait for promise
              } else {
                // We already tried and failed, or are looping. Stop.
                log.error("listenMqtt", `Critical: Session recovery failed/looped. Aborting.`);
                ctx.loggedIn = false;
-               return globalCallback({ type: "not_logged_in", error: "Not logged in (Recovery loop)" });
+               return globalCallback({ type: "not_logged_in", error: "Not logged in.", message: "Not logged in (session recovery looped)" });
              }
           }
 

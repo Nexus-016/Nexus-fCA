@@ -1,5 +1,18 @@
 # Changelog
 
+## [5.0.1] - 2026-11-14 - 🔗 GOATBOT V2 CONTRACT HOTFIX
+
+Audited the GoatBot V2 framework end-to-end (its real login flow, listener callback and error handling) and fixed three contract mismatches that made the bot freeze or duplicate listeners instead of relogging in.
+
+### Fixed
+- **Listener error contract (critical)**: the bot's `callBackListen` matches the literal strings `error.error == "Not logged in."` / `"Connection refused: Server unavailable"` to trigger its relogin/restart flow. Nexus emitted custom messages (`"Not logged in (Auto-recovery failed)"`, the raw broker error, ...) which failed the match — the bot logged the error and then did nothing: the listener stayed dead with no relogin and no restart. All dead-session sites now emit the canonical `"Not logged in."` (raw detail preserved in the `message` field, which the bot's lock detector also reads).
+- **`api.stopListening` added (critical)**: the bot's `stopListening()` calls `api.stopListening(cb)` before every relogin/relisten. It was missing, so the old MQTT connection survived restarts and every event was processed twice (duplicate replies). The new method force-ends the current MQTT client and notifies the caller; a missing client is a safe no-op.
+- **mbasic SeqID fallback dead-check made evidence-based (hidden bug)**: `getSeqIdFromMbasic` threw "Not logged in on mbasic" when the body contained bare `login` + `password` substrings — but logged-in mbasic pages also embed escaped login.php URLs and password-field markup in their prefetch config (the same false-positive class fixed for login in 4.4.1). Alive = this account's id in the page; a real login form without proof is the only dead signal.
+
+### Verified against the upstream GoatBot V2 framework
+- `login({ appState }, options, cb)` — callback contract, sync `getCurrentUserID()`, `getAppState()` array, `getThreadList(9999999, null, 'INBOX')` shape (`isGroup`/`threadID`), `getThreadInfo().inviteLink`, `getUserInfo()` name shape, `message`/`message_reply` event types — all present and matching.
+- 14-check contract suite passes; previous suites re-run green.
+
 ## [5.0.0] - 2026-11-14 - 🐐 GOAT UPDATE — GoatBot V2 FULL COMPATIBILITY
 
 ### Overview

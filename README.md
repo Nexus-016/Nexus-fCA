@@ -2,7 +2,7 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v5.0.0 — GOAT Update
+# Nexus-FCA v5.0.1 — GOAT Update
 
 [![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
 [![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
@@ -13,6 +13,14 @@
 > Full GoatBot V2 compatibility, cookie jar integrity, session-file protection, UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
 
 ---
+
+## What's New in v5.0.1 (GoatBot Contract Hotfix)
+
+Audited against the upstream GoatBot V2 framework and fixed three contract mismatches:
+
+- **Relogin trigger restored**: the bot's listener callback matches the literal `error.error == "Not logged in."` to start its relogin/restart flow — Nexus's custom error messages failed that match, leaving the bot silent with a dead listener. Dead-session errors now emit the canonical string (raw detail kept in `message`).
+- **`api.stopListening` added**: the bot calls it before every relogin; without it old MQTT connections survived and events were processed twice (duplicate replies).
+- **mbasic SeqID fallback evidence-based**: the hidden bare-substring dead-check (`login` + `password` substrings present in logged-in pages too) no longer false-positives healthy sessions.
 
 ## What's New in v5.0.0 (GOAT Update)
 
@@ -367,6 +375,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **5.0.1** | GoatBot V2 contract hotfix: canonical relogin error strings, `api.stopListening`, evidence-based mbasic dead-check |
 | **5.0.0** | 🐐 GOAT Update: full GoatBot V2 compatibility audit, cookie jar integrity (poisoning crash fixed), session-file protection, clean upload errors, logger correctness |
 | **4.4.1** | Session stability hotfix: evidence-based login validation, MQTT broker PUBACK compatibility, cookie refresher correctness, zero-warning boot |
 | **4.4.0** | Production hardening: UA fingerprint lock, login-time dead-cookie guard, CookieRefresher wiring, massive-load protections (group queue/circuit breaker/TTL sweeps), sqlite WAL, deps modernized (mqtt 5.16 / uuid 11 / ws 8.22) |
