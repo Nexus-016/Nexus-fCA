@@ -341,10 +341,21 @@ function buildAPI(globalOptions, html, jar) {
       }
       const intervalMs = opts.intervalMs || 180000; // 3 min
       let lastSavedJson = null;
-      const timer = setInterval(() => {
+      const timer = setInterval(async () => {
         try {
+          // Self-heal the jar before reading it — a single cookie with a
+          // broken expiry type would throw on every read from here on.
+          if (typeof utils.sanitizeCookieJar === 'function') {
+            await utils.sanitizeCookieJar(jar).catch(() => { });
+          }
           const appState = result.api.getAppState ? result.api.getAppState() : null;
           if (appState && appState.length) {
+            // Session-file protection: never replace a working appstate
+            // with an incomplete cookie set (missing c_user/xs).
+            if (!utils.isSafeAppState(appState)) {
+              logger("sessionGuard: incomplete cookie set (missing c_user/xs) — keeping the existing appstate file", "warn");
+              return;
+            }
             const json = JSON.stringify(appState, null, 2);
             // Skip unchanged writes: constant rewrites served nothing, churned
             // disk, and could trip file-watchers that react to mtime changes.

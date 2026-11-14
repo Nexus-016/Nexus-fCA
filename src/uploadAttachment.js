@@ -3,6 +3,17 @@ const log = require("npmlog");
 
 module.exports = function (defaultFuncs, api, ctx) {
 	// Helper function to retry upload with delay
+	// Permanent local errors (missing/inaccessible file) are NOT retried:
+	// the attachment stream's underlying file is gone, so every retry
+	// would repeat the same failure and spam the console. Network/transient
+	// errors still retry.
+	const PERMANENT_UPLOAD_PATTERN = /^(ENOENT|EACCES|EPERM|EISDIR|ENAMETOOLONG|EMFILE)\b/;
+	function isPermanentUploadError(err) {
+		const code = (err && err.code) || "";
+		const msg = String((err && err.message) || (err && err.error) || err || "");
+		return PERMANENT_UPLOAD_PATTERN.test(String(code)) || PERMANENT_UPLOAD_PATTERN.test(msg);
+	}
+
 	async function retryUpload(form, maxRetries = 3, delayMs = 2000) {
 		for (let attempt = 1; attempt <= maxRetries; attempt++) {
 			try {
@@ -13,7 +24,16 @@ module.exports = function (defaultFuncs, api, ctx) {
 				if (res.error) throw res;
 				return res.payload.metadata[0];
 			} catch (err) {
-				if (attempt === maxRetries) throw err;
+				if (attempt === maxRetries || isPermanentUploadError(err)) {
+					// Rewrite fs ENOENT noise into a single actionable line —
+					// the bot deleted its tmp attachment file before the
+					// upload consumed the stream.
+					if (isPermanentUploadError(err)) {
+						const path = (String(err && err.message || "").match(/stat '([^']+)'/) || [])[1];
+						err.message = "Attachment file not found" + (path ? `: ${path}` : "") + " — the file must exist until the upload completes (keep tmp attachment files alive while a send is in flight)";
+					}
+					throw err;
+				}
 				log.warn("uploadAttachment", `Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
 				await new Promise(resolve => setTimeout(resolve, delayMs));
 			}
@@ -50,7 +70,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 				callback(null, resData);
 			})
 			.catch(function (err) {
-				log.error("uploadAttachment", err);
+				log.error("uploadAttachment", (err && (err.message || err.error)) || err);
 				return callback(err);
 			});
 	}

@@ -57,6 +57,29 @@ function getAgent(url) {
     };
 }
 
+// tough-cookie requires cookie.expires to be a Date or the string
+// "Infinity". Anything else (a UTC/ISO string, a number, null) makes
+// every later getCookies/getCookieString call throw
+// "TypeError: this.expires.getTime is not a function" — the jar is
+// poisoned for all reads, not just the offending cookie. Cookies built
+// from appstate JSON always carry expires as a string, so every entry
+// point that accepts a cookie object must normalize it first.
+function normalizeCookieExpiry(value) {
+    if (value === undefined || value === null || value === "") return "Infinity";
+    if (value === "Infinity") return "Infinity";
+    if (value instanceof Date) return isNaN(value.getTime()) ? "Infinity" : value;
+    if (typeof value === "number") {
+        const ms = value > 1e12 ? value : value * 1000; // epoch secs or millis
+        const d = new Date(ms);
+        return isNaN(d.getTime()) ? "Infinity" : d;
+    }
+    if (typeof value === "string") {
+        const d = new Date(value);
+        return isNaN(d.getTime()) ? "Infinity" : d;
+    }
+    return "Infinity";
+}
+
 function getJar() {
     const jar = new CookieJar();
     const originalSetCookie = jar.setCookie;
@@ -65,6 +88,19 @@ function getJar() {
         if (typeof options === 'function') {
             callback = options;
             options = {};
+        }
+        if (cookieOrStr && typeof cookieOrStr === 'object') {
+            // Objects bypass tough-cookie's Set-Cookie parsing, so an
+            // invalid expires field would be stored as-is and poison
+            // the jar. Normalize before it enters the store.
+            cookieOrStr.expires = normalizeCookieExpiry(cookieOrStr.expires);
+            // tough-cookie's own parser strips the leading dot from a
+            // Domain attribute; cookies constructed directly keep it and
+            // then never match any URL in v5. Mirror the parser here.
+            if (typeof cookieOrStr.domain === 'string' && cookieOrStr.domain.charAt(0) === '.') {
+                cookieOrStr.domain = cookieOrStr.domain.slice(1);
+                cookieOrStr.hostOnly = false;
+            }
         }
         if (callback) {
             return originalSetCookie.call(jar, cookieOrStr, uri, options, callback);
@@ -1648,6 +1684,10 @@ function saveAppState(ctx) {
     if (!ctx || !ctx.jar || !ctx.appStatePath) return;
     try {
         const appState = getAppState(ctx.jar);
+        if (!isSafeAppState(appState)) {
+            log.warn("utils", "saveAppState: incomplete cookie set (missing c_user/xs) — keeping the existing appstate file");
+            return;
+        }
         const fs = require('fs');
         const path = require('path');
 
@@ -1805,11 +1845,50 @@ function decodeClientPayload(payload) {
     return JSON.parse(Utf8ArrayToStr(payload));
 }
 
+/**
+ * Repair any cookie in the jar whose expires field is not a Date or
+ * "Infinity". Uses the store's getAllCookies (no expiry matching), so
+ * it is safe to run even when a bad cookie would otherwise make every
+ * getCookies call throw. Returns the number of repaired cookies.
+ */
+async function sanitizeCookieJar(jar) {
+    if (!jar || !jar.store || typeof jar.store.getAllCookies !== "function") return 0;
+    const stored = await new Promise((resolve) => {
+        try {
+            jar.store.getAllCookies((err, list) => resolve(err ? [] : (list || [])));
+        } catch (_) {
+            resolve([]);
+        }
+    });
+    let fixed = 0;
+    for (const cookie of stored) {
+        if (!cookie) continue;
+        const raw = cookie.expires;
+        const fixedValue = normalizeCookieExpiry(raw);
+        if (fixedValue !== raw) {
+            cookie.expires = fixedValue;
+            fixed++;
+        }
+    }
+    return fixed;
+}
+
+/**
+ * A cookie set is only safe to persist when the session core is intact.
+ * Saving a set that lost c_user/xs would silently destroy a working
+ * session file (the exact failure reported in the field), so writers
+ * check this gate before touching the appstate file.
+ */
+function isSafeAppState(appState) {
+    if (!Array.isArray(appState) || appState.length === 0) return false;
+    const keys = new Set(appState.map((c) => c && c.key).filter(Boolean));
+    return keys.has("c_user") && keys.has("xs");
+}
+
 function getAppState(jar) {
     const all = jar.getCookies("https://www.facebook.com")
         .concat(jar.getCookies("https://facebook.com"))
-        .concat(jar.getCookies("https://www.messenger.com"));
-    // Dedupe: cookies with domain=.facebook.com show up under both the www and
+        .concat(jar.getCookies("https://www.messenger.com"));    // Dedupe: cookies with domain=.facebook.com show up under both the www and
     // apex URL lookups. Duplicate entries made the saved appstate messy.
     const seen = new Set();
     return all.filter(c => {
@@ -2184,6 +2263,9 @@ module.exports = {
     saveCookies,
     saveAppState,
     getAppState,
+    sanitizeCookieJar,
+    normalizeCookieExpiry,
+    isSafeAppState,
     getAppStateB64: function () {
         if (process.env.NEXUS_APPSTATE_B64) {
             try { return JSON.parse(Buffer.from(process.env.NEXUS_APPSTATE_B64, 'base64').toString('utf8')); }

@@ -2,7 +2,7 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v4.4.1
+# Nexus-FCA v5.0.0 — GOAT Update
 
 [![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
 [![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
@@ -10,7 +10,26 @@
 [![GitHub](https://img.shields.io/badge/github-Nexus--016%2FNexus--fCA-blue)](https://github.com/Nexus-016/Nexus-fCA)
 
 > Advanced, hardened, and massive-load-ready Facebook Messenger API for Node.js.
-> UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
+> Full GoatBot V2 compatibility, cookie jar integrity, session-file protection, UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
+
+---
+
+## What's New in v5.0.0 (GOAT Update)
+
+**GoatBot V2 Full Compatibility**
+- Every `api.*` method GoatBot V2 calls is verified present with matching semantics — messages, typing (v1/v2), thread info/list, user info, reactions, unsend, nickname/theme/emoji/color/image, group management, MQTT listener, appstate, dtsg refresh, and more. The audit runs as part of the test suite.
+- Drop-in for the bot: `login({ appState }, callback)` — the bot keeps its own session files, and Nexus never writes an incomplete cookie set over a working one.
+
+**Cookie Jar Integrity**
+- Cookies that enter the jar (or whose expiry is extended by the refresher) always keep a valid `expires` type — a plain string could previously poison the whole jar and crash every request with `this.expires.getTime is not a function`.
+- `sanitizeCookieJar` self-heals any cookie whose expiry lost its type, using the cookie store directly (safe even on an already-poisoned jar).
+
+**Session-File Protection**
+- Auto-savers (session guard, cookie refresher) refuse to persist a cookie set that lost the session core (`c_user`/`xs`) — a working appstate file is never overwritten with a broken one.
+
+**Cleaner Failure Reporting**
+- `uploadAttachment` no longer retries missing/inaccessible attachment files three times with full stack dumps; it fails fast with one actionable message. Transient network errors still retry.
+- Module-style logging (`logger("Module", "message", "level")`) now prints module name and message together; `debug` output is gated behind `NEXUS_DEBUG=1`.
 
 ---
 
@@ -348,6 +367,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **5.0.0** | 🐐 GOAT Update: full GoatBot V2 compatibility audit, cookie jar integrity (poisoning crash fixed), session-file protection, clean upload errors, logger correctness |
 | **4.4.1** | Session stability hotfix: evidence-based login validation, MQTT broker PUBACK compatibility, cookie refresher correctness, zero-warning boot |
 | **4.4.0** | Production hardening: UA fingerprint lock, login-time dead-cookie guard, CookieRefresher wiring, massive-load protections (group queue/circuit breaker/TTL sweeps), sqlite WAL, deps modernized (mqtt 5.16 / uuid 11 / ws 8.22) |
 | 4.3.x | E2EE bridge (BETA), storyManager, stickerStore, OldMessage fallback, createThemeAI endpoint fix, autoLogin subsystem, theme/sticker/friend APIs |

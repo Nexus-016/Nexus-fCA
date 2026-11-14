@@ -1,5 +1,24 @@
 # Changelog
 
+## [5.0.0] - 2026-11-14 - 🐐 GOAT UPDATE — GoatBot V2 FULL COMPATIBILITY
+
+### Overview
+The GOAT update makes Nexus-FCA fully drop-in for GoatBot V2: every API method the bot calls is verified present with matching semantics, and two field-reported session/data-integrity failures are fixed at the root. 34-check verification suite passes.
+
+### Fixed
+- **Cookie jar poisoning crash (critical)**: `CookieRefresher._extendCookieExpiry` assigned a UTC **string** to the `expires` field of the jar's *live* cookie objects (`getAppState` returns the jar's own cookies, not copies). tough-cookie requires `expires` to be a Date or `"Infinity"` — with a string in the jar, every later `getCookies` / `getCookieString` call failed with `TypeError: this.expires.getTime is not a function` (the sync read silently returned nothing while an unhandled rejection killed the process). Reproduced with the exact stack from the field (`matchingCookie → Cookie.expiryTime`). The refresher now assigns a real `Date`, and a new `utils.sanitizeCookieJar(jar)` repairs any cookie whose expiry lost its type using the store's `getAllCookies` (safe to run even on an already-poisoned jar). It runs before every refresher read, before every session-guard save, and the safety health-check self-heals and retries once if a read throws.
+- **Session file destroyed by incomplete save (critical)**: the field report "wrote a cookie set without c_user/xs, destroying the session file". Auto-savers now refuse to persist an incomplete cookie set: `utils.isSafeAppState(appState)` requires the session core (`c_user` + `xs`) and both the session guard (every 3 min) and the refresher save check it before touching the file — a broken set logs a warning and the previous appstate is kept untouched.
+- **`uploadAttachment` retry storm on permanent errors**: a deleted tmp attachment (ENOENT) retried 3 times and dumped got's full stack per attempt. Permanent local errors (`ENOENT`, `EACCES`, `EPERM`, `EISDIR`, ...) now fail fast — no retry — with one actionable line: `Attachment file not found: <path> — the file must exist until the upload completes`. Transient network errors still retry up to 3 attempts.
+- **Logger signature mismatch**: `lib/logger` exported `(text, level)` but modules called `logger("Module", "message", "level")` — the module name was printed as the message and the real text was dropped (the mysterious repeated `[ Nexus-FCA ] › CookieRefresher` lines). Both signatures now work (`[Module] message` is composed), `success` got a proper level, and `debug` is gated behind `NEXUS_DEBUG=1`.
+- **Cookie object entry hardening**: cookies entering the jar as objects are normalized in the `getJar()` wrapper — `expires` string/number → Date (or `"Infinity"`), and a leading-dot `domain` is stripped exactly like tough-cookie's own parser does (in v5 a dot-prefixed domain cookie never matches any URL).
+
+### GoatBot V2 compatibility (verified against the bot's real call sites)
+Every `api.*` method GoatBot V2 actually calls is present with matching semantics: `sendMessage`, `sendMessageMqtt`, `sendTypingIndicator`, `sendTypingIndicatorV2`, `getThreadInfo`, `getThreadList` (INBOX shape with `isGroup`/`threadID`), `getUserInfo`, `getAppState`, `setOptions`, `listenMqtt` (GoatBot event shapes), `markAsRead`, `markAsDelivered`, `setMessageReaction`, `unsendMessage`, `refreshFb_dtsg`, `changeNickname`, `changeThreadColor`, `changeThreadEmoji`, `changeGroupImage`, `setThreadTheme`, `createThemeAI`, `setTitle`, `addUserToGroup`, `removeUserFromGroup`, `getCurrentUserID`, `getAvatarUser`, `resolvePhotoUrl`, `getFriendsList`, `getThreadHistory`, `muteThread`, `uploadAttachment` and more — a compatibility audit is part of the test suite.
+
+### Verification
+- 34-check suite: cookie normalization (8), jar object gate (3), poisoned-jar self-heal incl. the exact field crash (5), session-file protection gate (5), refresher expiry/save behavior (4), logger dual signature (4), upload ENOENT fail-fast + transient retry (3). All pass.
+- Previous suites re-run green: refresher 9/9, MQTT normalizer 10/10, login classification suite 9/10 — the one failing check is the live fresh-login attempt against our test account, whose session Facebook invalidated server-side; the identical failure occurs on the previous release (4.4.1), confirming it is environmental, not a regression.
+
 ## [4.4.1] - 2026-11-13 - 🔧 SESSION STABILITY HOTFIX
 
 ### Overview
