@@ -1,5 +1,21 @@
 # Changelog
 
+## [5.0.3] - 2026-11-14 - 🧩 FULL GOATBOT V2 SURFACE AUDIT
+
+Completed the full surface audit the earlier audits only sampled: every API method the upstream main GoatBot V2 FCA exposes, every event type the bot's handlerAction dispatches, and the dev-user input shapes the upstream FCA accepts.
+
+### Added
+- **appState input normalization (upstream `loginHelper` parity)**: the upstream main-framework FCA accepts every dev-user input shape and normalizes them; ours threw. Now all shapes land as the internal `{key, value, domain, path, expires}` array: a raw cookie string (`"c_user=...; xs=...;"`), a JSON array string, cookie exports in `{name, value}` shape (renamed to `{key, value}` like upstream), or an already-normalized array (idempotent). Junk input now fails with a clear, actionable message instead of a bare parse error. Applied at every entry point (`loginHelper`, `login()`, `validateLogin`, `loginWithAppState`), so safety validation sees the final shape.
+
+### Fixed
+- **Task-response IDs are always strings**: the MQTT `/ls_resp` task ack for our own sends could carry the messageID/threadID/mid as numbers (Facebook encodes some payload fields numerically), while later events carry them as strings — the exact mismatch the bot framework added a type-tolerant reply lookup for. All task-response identifiers (`send_message_mqtt` threadID/messageID, `set_message_reaction`/`edit_message` mid) are now stringified at emission, matching upstream behavior.
+- **Numeric replyToMessage accepted**: `sendMessage` rejected a numeric reply target with "MessageID should be of type string". It is now coerced to string (other invalid types are still rejected), matching the bot framework's ID-type tolerance.
+
+### Verified (full surface)
+- All 53 upstream `fb-chat-api` apiFuncNames present in our FCA (`addExternalModule` … `httpPostFormData`), plus `api.setOptions`/`getAppState`/`listen` alias/`stopListening`.
+- All 8 event types the bot's `handlerAction` dispatches are emitted: `message`, `message_reply`, `message_unsend`, `event`, `message_reaction`, `typ`, `presence`, `read_receipt` — with upstream shapes (`read_receipt` via `formatDeltaReadReceipt`).
+- 32-check upstream-compat suite, 14-check contract suite, 34-check regression suite all green.
+
 ## [5.0.2] - 2026-11-14 - 🔗 UPSTREAM MAIN-FRAMEWORK SYNC
 
 Re-audited the changed Goat-X-Nexus bot framework and synced the login chain with the upstream main GoatBot V2 framework (its final `1.5.35` "fix: fca not working" commit), which fixed two login-time failure modes on datacenter hosting.

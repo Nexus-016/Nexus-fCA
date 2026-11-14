@@ -1219,21 +1219,27 @@ function getTaskResponseData(taskType, payload) {
   try {
     switch (taskType) {
       case "send_message_mqtt": {
+        // NEXUS FIX: always emit string IDs. The bot framework's reply
+        // registration stores this exact value and later events carry it
+        // as a string; a numeric ack here (Facebook encodes some payload
+        // fields as numbers) breaks api.unsendMessage, message.reply
+        // chains and every ID comparison in between (GoatBot V2 added a
+        // type-tolerant lookup for exactly this).
         return {
           type: taskType,
-          threadID: payload.step[1][2][2][1][2],
-          messageID: payload.step[1][2][2][1][3],
+          threadID: String(payload.step[1][2][2][1][2]),
+          messageID: String(payload.step[1][2][2][1][3]),
           payload: payload.step[1][2],
         };
       }
       case "set_message_reaction": {
         return {
-          mid: payload.step[1][2][2][1][4],
+          mid: String(payload.step[1][2][2][1][4]),
         };
       }
       case "edit_message": {
         return {
-          mid: payload.step[1][2][2][1][2],
+          mid: String(payload.step[1][2][2][1][2]),
         };
       }
     }

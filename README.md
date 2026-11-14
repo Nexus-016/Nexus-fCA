@@ -2,7 +2,7 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v5.0.2 — GOAT Update
+# Nexus-FCA v5.0.3 — GOAT Update
 
 [![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
 [![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
@@ -13,6 +13,13 @@
 > Full GoatBot V2 compatibility, cookie jar integrity, session-file protection, UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
 
 ---
+
+## What's New in v5.0.3 (Full GoatBot V2 Surface Audit)
+
+Full surface audit — every upstream API method, every event type, every dev-user input shape:
+
+- **appState input normalization (upstream parity)**: raw cookie strings (`"c_user=...; xs=...;"`), `{name, value}` cookie exports, JSON array strings and normal arrays are all accepted at every login entry point — the upstream main-framework FCA accepted all of these, ours threw "Failed to parse appState".
+- **String IDs everywhere**: MQTT task-ack messageID/threadID/mid are stringified at emission and `sendMessage` coerces a numeric reply target instead of rejecting — no more type-mismatch issues in reply chains.
 
 ## What's New in v5.0.2 (Upstream Main-Framework Sync)
 
@@ -383,6 +390,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **5.0.3** | Full GoatBot V2 surface audit: appState input normalization (cookie strings, `{name}` exports), string IDs in task acks, tolerant sendMessage reply target |
 | **5.0.2** | Upstream main-framework sync: m_basic device-mode fix, MPageLoadClientMetrics UA fallback, live-interstitial handling |
 | **5.0.1** | GoatBot V2 contract hotfix: canonical relogin error strings, `api.stopListening`, evidence-based mbasic dead-check |
 | **5.0.0** | 🐐 GOAT Update: full GoatBot V2 compatibility audit, cookie jar integrity (poisoning crash fixed), session-file protection, clean upload errors, logger correctness |

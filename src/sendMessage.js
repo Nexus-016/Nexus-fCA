@@ -289,7 +289,14 @@ module.exports = function (defaultFuncs, api, ctx) {
 		// Changing this to accomodate an array of users
 		if (threadIDType !== "Array" && threadIDType !== "Number" && threadIDType !== "String") return callback({ error: "ThreadID should be of type number, string, or array and not " + threadIDType + "." });
 
-		if (replyToMessage && messageIDType !== 'String') return callback({ error: "MessageID should be of type string and not " + messageIDType + "." });
+		// NEXUS FIX (GoatBot V2 parity): the bot framework's reply lookup is
+		// ID-type-tolerant because some FCA builds emit numeric message IDs.
+		// Coerce a numeric replyToMessage instead of rejecting it, so dev
+		// code that stored a numeric ID does not crash here.
+		if (replyToMessage && messageIDType !== 'String') {
+			if (messageIDType === 'Number') replyToMessage = String(replyToMessage);
+			else return callback({ error: "MessageID should be of type string and not " + messageIDType + "." });
+		}
 
 		if (msgType === "String") msg = { body: msg };
 		var disallowedProperties = Object.keys(msg).filter(prop => !allowedProperties[prop]);

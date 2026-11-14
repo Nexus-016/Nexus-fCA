@@ -460,6 +460,15 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
   let mainPromise = null;
   const jar = utils.getJar();
 
+  // Normalize dev-user input shapes ({name,value} cookie exports, raw
+  // cookie strings) to the internal {key, value, ...} shape — upstream
+  // main-framework (GoatBot V2 1.5.35) parity. Idempotent.
+  try {
+    appState = LoginManager.normalizeAppState(appState);
+  } catch (err) {
+    return callback(err);
+  }
+
   // Initialize LoginManager
   const loginManager = new LoginManager(globalSafety);
 
