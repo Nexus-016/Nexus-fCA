@@ -1215,6 +1215,40 @@ function scheduleAdaptiveReconnect(defaultFuncs, api, ctx, globalCallback, reaso
     listenMqtt(defaultFuncs, api, ctx, globalCallback);
   }, delay);
 }
+// Walk a /ls_resp payload for optimistic-message ids: the ack for a
+// LightSpeed send may embed the message/thread ids inside
+// replaceOptimisticMessage / insertMessage ops (first-time DM and
+// message-request threads differ) instead of the fixed positions of the
+// primary ack shape. Descends through arrays and object values.
+function walkOptimisticMessageIds(node) {
+  const out = { messageID: null, threadID: null };
+  if (!node || typeof node !== "object") return out;
+
+  const visit = (child) => {
+    if (out.messageID != null && out.threadID != null) return;
+    if (Array.isArray(child) && child[0] === 5 && typeof child[1] === "string") {
+      if (/optimisticmessage|insertmessage/i.test(child[1])) {
+        if (child[3] != null && (typeof child[3] === "string" || typeof child[3] === "number")) {
+          if (out.messageID == null) out.messageID = String(child[3]);
+        } else if (child[2] && typeof child[2] === "object") {
+          const cand = child[2].message_id || child[2].id || child[2].mid;
+          if (cand != null && out.messageID == null) out.messageID = String(cand);
+        }
+      } else if (child[1] === "writeCTAIdToThreadsTable" && Array.isArray(child[2]) && child[2][0] === 19) {
+        if (out.threadID == null) out.threadID = String(child[2][1]);
+      }
+    }
+    if (child && typeof child === "object") {
+      const values = Array.isArray(child) ? child : Object.keys(child).map((k) => child[k]);
+      for (const v of values) visit(v);
+    }
+  };
+
+  const values = Array.isArray(node) ? node : Object.keys(node).map((k) => node[k]);
+  for (const v of values) visit(v);
+  return out;
+}
+
 function getTaskResponseData(taskType, payload) {
   try {
     switch (taskType) {
@@ -1225,11 +1259,28 @@ function getTaskResponseData(taskType, payload) {
         // fields as numbers) breaks api.unsendMessage, message.reply
         // chains and every ID comparison in between (GoatBot V2 added a
         // type-tolerant lookup for exactly this).
+        let threadID = null;
+        let messageID = null;
+        let rawStep = null;
+        try {
+          threadID = payload.step[1][2][2][1][2];
+          messageID = payload.step[1][2][2][1][3];
+          rawStep = payload.step[1][2];
+        } catch (_) { }
+        // Tolerant fallback so a delivered message is never mistaken for a
+        // failed one (the LightSpeed listener falls back to the web send
+        // path on "error", which would duplicate a delivered message).
+        if (messageID == null || threadID == null) {
+          const walked = walkOptimisticMessageIds(payload);
+          if (walked.messageID != null) messageID = walked.messageID;
+          if (walked.threadID != null) threadID = walked.threadID;
+        }
+        if (messageID == null && threadID == null) return null;
         return {
           type: taskType,
-          threadID: String(payload.step[1][2][2][1][2]),
-          messageID: String(payload.step[1][2][2][1][3]),
-          payload: payload.step[1][2],
+          threadID: threadID == null ? null : String(threadID),
+          messageID: messageID == null ? null : String(messageID),
+          payload: rawStep,
         };
       }
       case "set_message_reaction": {
@@ -1954,3 +2005,7 @@ module.exports = function (defaultFuncs, api, ctx) {
     return msgEmitter;
   };
 };
+
+// Exposed for tooling/tests: the /ls_resp task-response extractor used to
+// resolve LightSpeed send acks (string IDs; tolerant optimistic-message walk).
+module.exports.getTaskResponseData = getTaskResponseData;

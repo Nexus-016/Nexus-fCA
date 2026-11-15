@@ -1,5 +1,18 @@
 # Changelog
 
+## [5.1.0] - 2026-11-15 - ⚡ LIGHTSPEED SEND (MESSENGER-APP PATH)
+
+Adopted the Messenger app's own send channel — the LightSpeed task — natively.
+
+### Added
+- **`sendMessage` now sends through MQTT `/ls_req` when the listener is connected**: text, sticker and reply messages go through the same LightSpeed task the Messenger app uses (`app_id 2220391788200892`, label `46`, `epoch_id` derived from the timestamp, `otid` reusing the same offline-threading id as the web path), instead of the heavily scrutinized legacy `www.facebook.com/messaging/send/` POST. This keeps the bot's traffic pattern app-like and reduces the web footprint per message.
+- The send ack (`/ls_resp`) resolves through the existing `ctx.tasks` map with string `threadID`/`messageID`; an ack whose ids cannot be extracted is treated as *delivered with an unknown id* (the offline id is returned) rather than a failure — falling back to the web path after an accepted publish would risk duplicate messages.
+- **Automatic web fallback**: attachments, URLs, locations and mentions still route through the proven web path, as does every send when MQTT is disconnected, when `sendViaMqtt: false` is set, or when the LightSpeed ack does not arrive within 15 s. The previous web chain is fully preserved as the fallback.
+- **Tolerant ack extraction**: `getTaskResponseData` now walks the step tree for optimistic-message ids (`replaceOptimisticMessage` / `insertMessage` / `writeCTAIdToThreadsTable`) when the primary ack positions are absent — first-time DM and message-request threads use a different ack shape. The extractor is exported from the listener module for tooling.
+
+### Verified
+- 83-check upstream-compat suite (10 sections; the new section covers the `/ls_req` request shape, sticker/reply payloads, web-fallback routing for unsupported shapes and the timeout fallback), 34-check regression suite, 14-check contract suite — all green in both copies.
+
 ## [5.0.6] - 2026-11-15 - 🧠 SENIOR-LEVEL DEEP AUDIT (ROUND 2)
 
 Second, deeper audit pass over the crash/corruption/leak classes the first pass could not reach.

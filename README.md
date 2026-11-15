@@ -2,7 +2,7 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v5.0.6 — GOAT Update
+# Nexus-FCA v5.1.0 — GOAT Update
 
 [![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
 [![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
@@ -13,6 +13,13 @@
 > Full GoatBot V2 compatibility, cookie jar integrity, session-file protection, UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
 
 ---
+
+## What's New in v5.1.0 (Lightspeed Send)
+
+- **Messages now go through the Messenger app's own channel**: when the listener is connected, `sendMessage` publishes the same LightSpeed task (`/ls_req`, `app_id 2220391788200892`, label `46`) the Messenger app uses — text, sticker and reply messages no longer touch the heavily scrutinized legacy `www.facebook.com/messaging/send/` POST.
+- **Automatic web fallback**: attachments, URLs, locations, mentions, `sendViaMqtt: false`, a disconnected listener and a missing ack (15 s) all fall back to the proven web path — the old chain is fully preserved.
+- **Tolerant ack extraction**: first-time DM / message-request threads ack through optimistic-message ops (`replaceOptimisticMessage` / `insertMessage` / `writeCTAIdToThreadsTable`); the extractor walks the step tree and is exported for tooling.
+- **Why it matters**: every message sent through LightSpeed is one less hit on the legacy web send endpoint — the bot's traffic pattern looks like the Messenger app instead of a browser script hitting `messaging/send/`.
 
 ## What's New in v5.0.6 (Deep Audit)
 
@@ -410,6 +417,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **5.1.0** | ⚡ Lightspeed send: messages go through the Messenger app's `/ls_req` task channel (text/sticker/reply), automatic web fallback, tolerant ack extraction |
 | **5.0.6** | Deep audit: atomic appstate writes (crash-proof), real `{signal}` refresh semantics, CookieRefresher disposal on re-login |
 | **5.0.5** | Hidden-issue audit: fully-local `getUID` (third-party resolver removed), throttled appstate auto-persist, CookieRefresher timer hygiene |
 | **5.0.4** | Advanced parity: local cookie-liveness probe (`login.utils.checkLiveCookie`), device identifiers, live listener options |

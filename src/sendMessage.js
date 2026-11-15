@@ -16,6 +16,130 @@ var allowedProperties = {
 };
 
 module.exports = function (defaultFuncs, api, ctx) {
+	// NEXUS LIGHTSPEED: native Messenger-app style send over MQTT /ls_req.
+	// The Messenger app sends messages through the LightSpeed channel
+	// (/ls_req tasks) instead of the legacy web endpoint; sending through
+	// it keeps the bot's traffic pattern app-like and avoids the heavily
+	// scrutinized www.facebook.com/messaging/send/ POST. Falls back to
+	// the web path whenever MQTT is not connected or the message shape is
+	// not supported by the task payload.
+	const LS_APP_ID = "2220391788200892";
+	const LS_VERSION_ID = "7214102258676893";
+	const LS_SEND_LABEL = "46";
+
+	function canSendViaLightspeed(msg, threadIDType) {
+		if (threadIDType === "Array") return false;
+		const client = ctx.mqttClient;
+		if (!client || !client.connected || typeof client.publish !== "function") return false;
+		if (ctx.globalOptions && ctx.globalOptions.sendViaMqtt === false) return false;
+		if (msg.attachment != null || msg.url != null || msg.location != null || msg.mentions != null) return false;
+		if (msg.emoji != null && msg.body != null) return false; // web path validates this combination
+		return msg.body != null || msg.sticker != null || msg.emoji != null;
+	}
+
+	function sendViaLightspeed(msg, threadID, callback, replyToMessage, messageAndOTID, webFallback) {
+		const client = ctx.mqttClient;
+		ctx.wsReqNumber = ctx.wsReqNumber || 0;
+		ctx.wsTaskNumber = ctx.wsTaskNumber || 0;
+		const requestId = ++ctx.wsReqNumber;
+
+		const body = msg.body != null ? String(msg.body) : "";
+		const payload0 = {
+			thread_id: String(threadID),
+			otid: messageAndOTID,
+			source: 2097153,
+			send_type: 1,
+			sync_group: 1,
+			mark_thread_read: 1,
+			text: body === "" ? null : body,
+			initiating_source: 0,
+			skip_url_preview_gen: 1,
+			text_has_links: /(https?:\/\/|www\.)/i.test(body) ? 1 : 0,
+			multitab_env: 0,
+			metadata_dataclass: JSON.stringify({ media_accessibility_metadata: { alt_text: null } })
+		};
+
+		if (msg.sticker) { payload0.send_type = 2; payload0.sticker_id = msg.sticker; }
+		if (msg.emoji) {
+			payload0.send_type = 1;
+			payload0.text = msg.emoji;
+			payload0.hot_emoji_size = msg.emojiSize === "small" ? 1 : msg.emojiSize === "large" ? 3 : 2;
+		}
+		if (replyToMessage) {
+			payload0.reply_metadata = {
+				reply_source_id: String(replyToMessage),
+				reply_source_type: 1,
+				reply_type: 0
+			};
+		}
+
+		const content = {
+			app_id: LS_APP_ID,
+			payload: JSON.stringify({
+				tasks: [{
+					failure_count: null,
+					label: LS_SEND_LABEL,
+					payload: JSON.stringify(payload0),
+					queue_name: String(threadID),
+					task_id: ++ctx.wsTaskNumber
+				}],
+				epoch_id: (BigInt(Date.now()) << 22n).toString(),
+				version_id: LS_VERSION_ID
+			}),
+			request_id: requestId,
+			type: 3
+		};
+
+		let settled = false;
+		const finish = (err, messageInfo) => {
+			if (settled) return;
+			settled = true;
+			if (ctx.tasks && typeof ctx.tasks.delete === "function") ctx.tasks.delete(requestId);
+			clearTimeout(timer);
+			callback(err, messageInfo);
+		};
+
+		const timeoutMs = Number(ctx._lsSendTimeoutMs) > 0 ? Number(ctx._lsSendTimeoutMs) : 15000;
+		const timer = setTimeout(function () {
+			log.warn("sendMessage", "Lightspeed send ack timed out, falling back to the web send path");
+			try { webFallback(); } catch (e) { finish(e); }
+		}, timeoutMs);
+		if (typeof timer.unref === "function") timer.unref();
+
+		// Route the /ls_resp for this request through the shared tasks map:
+		// the listener resolves it via getTaskResponseData. A task whose ids
+		// cannot be extracted is treated as delivered-with-unknown-id (the
+		// publish was accepted at QoS 1) — falling back to the web path here
+		// would risk a duplicate message.
+		if (!ctx.tasks || typeof ctx.tasks.set !== "function") ctx.tasks = new Map();
+		ctx.tasks.set(requestId, {
+			type: "send_message_mqtt",
+			callback: function (err, data) {
+				if (err) {
+					log.warn("sendMessage", "Lightspeed send rejected, falling back to the web send path");
+					try { webFallback(); } catch (e) { finish(e); }
+					return;
+				}
+				const messageID = data.messageID || String(messageAndOTID);
+				finish(null, {
+					threadID: String(data.threadID || threadID),
+					messageID: messageID,
+					senderID: String(ctx.userID),
+					timestamp: String(Date.now()),
+					attachments: [],
+					body: body || "",
+					type: "message"
+				});
+			}
+		});
+
+		try {
+			client.publish("/ls_req", JSON.stringify(content), { qos: 1 });
+		} catch (publishErr) {
+			finish(publishErr && publishErr.message ? { error: publishErr.message } : { error: "Lightspeed publish failed." });
+		}
+	}
+
 	// Helper function to retry upload with delay
 	async function retryUpload(form, maxRetries = 3, delayMs = 2000) {
 		for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -342,19 +466,30 @@ module.exports = function (defaultFuncs, api, ctx) {
 			}) : undefined
 		};
 
-		handleLocation(msg, form, callback, () =>
-			handleSticker(msg, form, callback, () =>
-				handleAttachment(msg, form, callback, () =>
-					handleUrl(msg, form, callback, () =>
-						handleEmoji(msg, form, callback, () =>
-							handleMention(msg, form, callback, () =>
-								send(form, threadID, messageAndOTID, callback, isGroup)
+		// NEXUS LIGHTSPEED: prefer the Messenger-app send path when MQTT is
+		// connected and the message shape is supported; the web chain below
+		// remains the fallback for everything else.
+		const sendViaWebChain = () =>
+			handleLocation(msg, form, callback, () =>
+				handleSticker(msg, form, callback, () =>
+					handleAttachment(msg, form, callback, () =>
+						handleUrl(msg, form, callback, () =>
+							handleEmoji(msg, form, callback, () =>
+								handleMention(msg, form, callback, () =>
+									send(form, threadID, messageAndOTID, callback, isGroup)
+								)
 							)
 						)
 					)
 				)
-			)
-		);
+			);
+
+		if (canSendViaLightspeed(msg, threadIDType)) {
+			sendViaLightspeed(msg, threadID, callback, replyToMessage, messageAndOTID, sendViaWebChain);
+			return returnPromise;
+		}
+
+		sendViaWebChain();
 		return returnPromise;
 	};
 };
