@@ -24,20 +24,90 @@ module.exports = function (defaultFuncs, api, ctx) {
 	// the web path whenever MQTT is not connected or the message shape is
 	// not supported by the task payload.
 	const LS_APP_ID = "2220391788200892";
-	const LS_VERSION_ID = "7214102258676893";
+	const LS_VERSION_ID = "24804310205905615";
 	const LS_SEND_LABEL = "46";
+	const LS_READ_LABEL = "21";
 
 	function canSendViaLightspeed(msg, threadIDType) {
 		if (threadIDType === "Array") return false;
 		const client = ctx.mqttClient;
 		if (!client || !client.connected || typeof client.publish !== "function") return false;
 		if (ctx.globalOptions && ctx.globalOptions.sendViaMqtt === false) return false;
-		if (msg.attachment != null || msg.url != null || msg.location != null || msg.mentions != null) return false;
+		if (msg.url != null) return false; // explicit share-card flow stays on the web path
 		if (msg.emoji != null && msg.body != null) return false; // web path validates this combination
-		return msg.body != null || msg.sticker != null || msg.emoji != null;
+		if (msg.sticker != null || msg.emoji != null) {
+			// sticker/emoji own the send_type field — keep the combos the
+			// task payload supports; anything mixed goes back to the web path
+			if (msg.attachment != null || msg.location != null || msg.mentions != null) return false;
+		}
+		if (msg.attachment != null) {
+			// attachments go through the LightSpeed task as fbids: every
+			// attachment must be a readable stream the upload helper accepts
+			const list = Array.isArray(msg.attachment) ? msg.attachment : [msg.attachment];
+			for (const a of list) {
+				if (!utils.isReadableStream(a)) return false;
+			}
+		}
+		if (msg.location != null && !(msg.location.latitude != null && msg.location.longitude != null)) return false;
+		// mentions are offsets into the text — a mention without body text
+		// has no place to point at, so it stays on the web path
+		if (msg.mentions != null && !(Array.isArray(msg.mentions) && msg.mentions.length && msg.body != null && msg.mentions.some(m => m && m.id != null))) return false;
+		return msg.body != null || msg.sticker != null || msg.emoji != null || msg.attachment != null || msg.location != null;
 	}
 
-	function sendViaLightspeed(msg, threadID, callback, replyToMessage, messageAndOTID, webFallback) {
+	// NEXUS LIGHTSPEED: mention_data shape — comma-joined ids/offsets/
+	// lengths/types referencing the plain body (no marker char prepended;
+	// the web path's \u200E marker is a web-form-only behavior).
+	function buildMentionData(msg, body) {
+		if (!Array.isArray(msg.mentions) || !msg.mentions.length) return null;
+		const ids = [], offsets = [], lengths = [], types = [];
+		for (const m of msg.mentions) {
+			if (!m || m.id == null) continue;
+			let tag = String(m.tag || "");
+			if (tag && tag.charAt(0) !== "@") tag = "@" + tag;
+			const fromIndex = Number.isInteger(m.fromIndex) ? m.fromIndex : 0;
+			let offset = body ? body.indexOf(tag, fromIndex) : -1;
+			if (offset < 0 && tag.length > 1) offset = body ? body.indexOf(tag.slice(1), fromIndex) : -1;
+			if (offset < 0) offset = 0;
+			ids.push(String(m.id));
+			offsets.push(String(offset));
+			lengths.push(String(tag.length));
+			types.push("p");
+		}
+		if (!ids.length) return null;
+		return {
+			mention_ids: ids.join(","),
+			mention_offsets: offsets.join(","),
+			mention_lengths: lengths.join(","),
+			mention_types: types.join(",")
+		};
+	}
+
+	// Collect LightSpeed attachment fbids from the upload metadata (the
+	// upload endpoint reports the id under a type-specific key).
+	function collectAttachmentFbids(metadataList) {
+		const fbids = [];
+		for (const m of metadataList || []) {
+			if (!m) continue;
+			const fbid = m.image_id || m.video_id || m.audio_id || m.file_id || m.gif_id || m.sticker_id;
+			if (fbid) fbids.push(String(fbid));
+		}
+		return fbids;
+	}
+
+	// NEXUS LIGHTSPEED: message-id -> thread-id index so the unsend task
+	// can fill its thread_key without an extra lookup (capped, FIFO).
+	function recordMessageThread(messageID, threadID) {
+		if (!ctx._messageThreadIndex || typeof ctx._messageThreadIndex.set !== "function") ctx._messageThreadIndex = new Map();
+		const m = ctx._messageThreadIndex;
+		m.set(String(messageID), String(threadID));
+		if (m.size > 500) {
+			const firstKey = m.keys().next().value;
+			m.delete(firstKey);
+		}
+	}
+
+	function sendViaLightspeed(msg, threadID, callback, replyToMessage, messageAndOTID, webFallback, attachmentFbids) {
 		const client = ctx.mqttClient;
 		ctx.wsReqNumber = ctx.wsReqNumber || 0;
 		ctx.wsTaskNumber = ctx.wsTaskNumber || 0;
@@ -72,19 +142,54 @@ module.exports = function (defaultFuncs, api, ctx) {
 				reply_type: 0
 			};
 		}
+		const mentionData = buildMentionData(msg, body);
+		if (mentionData) payload0.mention_data = mentionData;
+		if (msg.location && msg.location.latitude != null && msg.location.longitude != null) {
+			payload0.send_type = 1;
+			payload0.location_data = {
+				coordinates: { latitude: msg.location.latitude, longitude: msg.location.longitude },
+				is_current_location: Boolean(msg.location.current),
+				is_live_location: Boolean(msg.location.live)
+			};
+		}
+		if (attachmentFbids && attachmentFbids.length) {
+			// attachment carries its own send_type; the upload already
+			// happened on the proven web upload endpoint before this point
+			payload0.send_type = 3;
+			payload0.text = body === "" ? null : body;
+			payload0.attachment_fbids = attachmentFbids.map(String);
+		}
+
+		// The task envelope: the send task plus the read-watermark task
+		// the Messenger app publishes alongside every send.
+		const tasks = [{
+			failure_count: null,
+			label: LS_SEND_LABEL,
+			payload: JSON.stringify(payload0),
+			queue_name: String(threadID),
+			task_id: ++ctx.wsTaskNumber
+		}];
+		if (attachmentFbids && attachmentFbids.length) {
+			tasks.push({
+				failure_count: null,
+				label: LS_READ_LABEL,
+				payload: JSON.stringify({
+					thread_id: String(threadID),
+					last_read_watermark_ts: Date.now(),
+					sync_group: 1
+				}),
+				queue_name: String(threadID),
+				task_id: ++ctx.wsTaskNumber
+			});
+		}
 
 		const content = {
 			app_id: LS_APP_ID,
 			payload: JSON.stringify({
-				tasks: [{
-					failure_count: null,
-					label: LS_SEND_LABEL,
-					payload: JSON.stringify(payload0),
-					queue_name: String(threadID),
-					task_id: ++ctx.wsTaskNumber
-				}],
+				tasks: tasks,
 				epoch_id: (BigInt(Date.now()) << 22n).toString(),
-				version_id: LS_VERSION_ID
+				version_id: LS_VERSION_ID,
+				data_trace_id: "#" + Buffer.from(String(Math.random())).toString("base64").replace(/=+$/, "")
 			}),
 			request_id: requestId,
 			type: 3
@@ -121,6 +226,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 					return;
 				}
 				const messageID = data.messageID || String(messageAndOTID);
+				recordMessageThread(messageID, data.threadID || threadID);
 				finish(null, {
 					threadID: String(data.threadID || threadID),
 					messageID: messageID,
@@ -261,6 +367,8 @@ module.exports = function (defaultFuncs, api, ctx) {
 						} || p
 					);
 				}, null);
+
+				if (messageInfo && messageInfo.messageID != null) recordMessageThread(messageInfo.messageID, messageInfo.threadID);
 
 				return callback(null, messageInfo);
 			})
@@ -484,12 +592,31 @@ module.exports = function (defaultFuncs, api, ctx) {
 				)
 			);
 
-		if (canSendViaLightspeed(msg, threadIDType)) {
-			sendViaLightspeed(msg, threadID, callback, replyToMessage, messageAndOTID, sendViaWebChain);
+		if (!canSendViaLightspeed(msg, threadIDType)) {
+			sendViaWebChain();
 			return returnPromise;
 		}
 
-		sendViaWebChain();
+		if (msg.attachment != null) {
+			// NEXUS LIGHTSPEED: attachments go through the task payload as
+			// fbids, so the streams are uploaded through the existing (and
+			// proven) web upload endpoint first, then referenced in the
+			// LightSpeed task. Any upload problem routes the whole message
+			// through the web chain, which reports errors in the same shape
+			// as before.
+			const streams = (Array.isArray(msg.attachment) ? msg.attachment : [msg.attachment]);
+			uploadAttachment(streams, function (uploadErr, metadataList) {
+				const fbids = uploadErr ? [] : collectAttachmentFbids(metadataList);
+				if (!fbids.length) {
+					sendViaWebChain();
+					return;
+				}
+				sendViaLightspeed(msg, threadID, callback, replyToMessage, messageAndOTID, sendViaWebChain, fbids);
+			});
+			return returnPromise;
+		}
+
+		sendViaLightspeed(msg, threadID, callback, replyToMessage, messageAndOTID, sendViaWebChain, null);
 		return returnPromise;
 	};
 };

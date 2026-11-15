@@ -1249,6 +1249,19 @@ function walkOptimisticMessageIds(node) {
   return out;
 }
 
+// Task types whose LightSpeed ack is the success signal itself (no id
+// positions to extract): the /ls_resp for our request_id means the task
+// was processed by the server.
+const GENERIC_LS_ACK_TYPES = new Set([
+  "delete_message",
+  "change_nickname",
+  "add_participants",
+  "change_admin_status",
+  "change_thread_image",
+  "create_poll",
+  "change_thread_emoji",
+]);
+
 function getTaskResponseData(taskType, payload) {
   try {
     switch (taskType) {
@@ -1292,6 +1305,38 @@ function getTaskResponseData(taskType, payload) {
         return {
           mid: String(payload.step[1][2][2][1][2]),
         };
+      }
+      case "unsend_message": {
+        // The unsend ack echoes the unsent id (and, when present, the
+        // tombstone body). Receiving the /ls_resp at all means the task
+        // was processed — never report a delivered unsend as failed
+        // (the caller would re-run the web path).
+        let messageID = null;
+        let body = null;
+        try {
+          messageID = payload.step[1][2][2][1][2];
+          body = payload.step[1][2][2][1][4];
+        } catch (_) { }
+        if (messageID == null) {
+          const walked = walkOptimisticMessageIds(payload);
+          if (walked.messageID != null) messageID = walked.messageID;
+        }
+        return {
+          ack: true,
+          messageID: messageID == null ? null : String(messageID),
+          body: body == null ? null : String(body),
+          raw: payload,
+        };
+      }
+      default: {
+        // Generic acks for the other migrated LightSpeed tasks (delete,
+        // nickname, admin status, group image, poll, emoji, participants):
+        // the response for our request_id is itself the success signal —
+        // pass the raw payload through for tooling.
+        if (GENERIC_LS_ACK_TYPES.has(taskType)) {
+          return { ack: true, raw: payload };
+        }
+        return null;
       }
     }
   } catch (error) {

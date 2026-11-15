@@ -1,5 +1,46 @@
 # Changelog
 
+## [5.2.0] - 2026-11-16 - ⚡ LIGHTSPEED-2 (FULL APP-SURFACE MIGRATION)
+
+Pushed the Messenger-app surface as far as the protocol supports: every
+messaging operation now prefers the LightSpeed task channel and keeps the
+proven web path as a silent, idempotent fallback.
+
+### Added
+- **Thread operations now go through `/ls_req` tasks** (shapes extracted as
+  protocol reference, implemented natively): unsend (label 33), delete (146),
+  nickname (44), group image (37, after the shared web upload), poll (163),
+  thread emoji (100003), add-participants (23, dedicated app id) and admin
+  status (25, dedicated app id + null `data_trace_id`). A publish error, a
+  task rejection or a missing ack (15 s) silently falls back to the exact
+  previous web chain — every migrated op is idempotent, so a fallback can
+  never corrupt thread state.
+- **`sendMessage` now carries the full message surface through LightSpeed**:
+  mentions (`mention_data` with comma-joined ids/offsets/lengths/types on the
+  plain body), locations (`location_data` coordinates/current/live) and
+  attachments (`send_type 3` + `attachment_fbids`, uploaded through the
+  existing web upload endpoint first, plus the app's read-watermark task
+  label 21). Explicit url share-cards, non-stream attachments, mentions
+  without body text and sticker/emoji mixes stay on the web path by design.
+- **Shared task engine (`src/lsTask.js`)**: one place owns the `/ls_req`
+  envelope, `ctx.tasks` ack routing, the ack timeout and cleanup — the
+  fallback discipline is identical across every operation.
+- **`_messageThreadIndex`** (capped at 500, FIFO): message-id → thread-id
+  index fed at send time (both ack and web success paths) so the unsend task
+  can fill its `thread_key`; unknown ids use the message id itself (the
+  delete-task convention).
+- **Ack extraction for the new task types**: `unsend_message` extracts the
+  tombstone id/body with the tolerant walk; generic task types pass the raw
+  ack through (receiving the response for our `request_id` is the success
+  signal). Unknown types still return null.
+
+### Verified
+- 151 checks green in the bot copy (103-check upstream-compat suite in 11
+  sections + 34-check regression + 14-check contract), and the same 103-check
+  suite green in the standalone copy. New coverage: every task shape, the
+  thread-key index, all four fallback triggers (no MQTT / task rejection /
+  ack timeout / unextractable ack) and the attachment upload→fbid→task chain.
+
 ## [5.1.0] - 2026-11-15 - ⚡ LIGHTSPEED SEND (MESSENGER-APP PATH)
 
 Adopted the Messenger app's own send channel — the LightSpeed task — natively.
