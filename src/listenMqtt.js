@@ -1378,7 +1378,7 @@ function formatReplyMetadata(replyData, threadID, isGroup) {
     args: body.trim() ? body.trim().split(/\s+/) : [],
     body: body,
     isGroup: threadKey.threadFbId ? true : !!isGroup,
-    mentions: utils.formatMentions(replyData.data, body, replyData.mentions),
+    mentions: utils.formatMentions(replyData.data, body, replyData.mentions, metadata),
     timestamp: Number(metadata.timestamp) || Date.now(),
     participantIDs: Array.isArray(replyData.participants)
       ? replyData.participants.map((e) => e.toString())
@@ -1481,7 +1481,8 @@ function parseDelta(defaultFuncs, api, ctx, globalCallback, { delta }) {
             mentions: utils.formatMentions(
               replyMessage.data,
               replyBody,
-              replyMessage.mentions
+              replyMessage.mentions,
+              replyMessage.messageMetadata
             ),
             timestamp: Number(messageMetadata.timestamp) || Date.now(),
             participantIDs: Array.isArray(replyMessage.participants)

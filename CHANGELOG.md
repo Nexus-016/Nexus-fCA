@@ -1,5 +1,48 @@
 # Changelog
 
+## [5.2.3] - 2026-11-17 - 🏷️ MENTION FIX (NEW FACEBOOK METADATA SHAPE)
+
+Fixes `event.mentions` arriving empty for every incoming message with a
+tag — the visible symptom being mention-dependent bot commands doing
+nothing.
+
+### Root cause
+Facebook stopped delivering mention data in `data.prng` on newer MQTT
+deltas and moved it into the protobuf-ish
+`messageMetadata.data.data.Gb.asMap.data` container, with every scalar
+wrapped as `{ asLong: "..." }` / `{ asNumber: "..." }`. A parser that
+only reads `data.prng` / `m.mentions` / `ranges` found no rows, so the
+mentions map came out empty.
+
+### Added / Fixed
+- **`parseMetadataMentions(metadata)` (`utils.js`)**: parses the
+  `messageMetadata.data.(data.)Gb.asMap.data` container (both nesting
+  variants) into mention rows.
+- **`unwrapMentionScalar()` (`utils.js`)**: unwraps protobuf scalar
+  wrappers before parsing; wired into `normalizeMentionID` and the
+  offset/length extraction so wrapped values no longer yield NaN.
+- **`formatMentions(data, body, extra, metadata)`**: optional fourth
+  argument appends the metadata rows. `formatDeltaMessage` (main
+  message path) and both reply paths in `listenMqtt.js`
+  (`formatReplyMetadata`, `parseDelta` reply) now pass
+  `messageMetadata` through.
+- **Multipart upload retry (`utils.js`)**: `postFormData` accepts a
+  body factory and attaches it to the built body
+  (`_nexusFormFactory`); `got`-level replay of consumed multipart
+  bodies is disabled (`retry: { limit: 0 }`), the transport-error
+  retry rebuilds a fresh body, and `parseAndCheckLogin`'s 5xx retry
+  refuses to replay a consumed multipart upload (it used to send an
+  empty body and get a 400 back). `postFormDataWithDefault` keeps
+  factories as factories.
+
+### Verified
+- 195 checks green in the bot copy: 58-check contract suite (now
+  covering every mention shape — legacy `prng`, new metadata
+  container, protobuf scalars, ranges, plain map,
+  `formatDeltaMessage` end-to-end, malformed-metadata silence, and
+  the multipart retry factory), 103-check upstream-compat, 34-check
+  regression; standalone 103/103.
+
 ## [5.2.2] - 2026-11-16 - 🔐 VAULT HARDENING (QUOTA GUARD + LIVE SEED)
 
 Hardening for the Session Vault shipped in 5.2.1, driven by the live

@@ -1,6 +1,6 @@
 {
   "name": "nexus-fca",
-  "version": "5.2.2",
+  "version": "5.2.3",
   "description": "Nexus-FCA - Advanced Facebook Messenger API (MQTT) with UA fingerprint lock, cookie refresher, anti-lock session guard and massive-load protections | Team Nexus",
   "main": "index.js",
   "types": "index.d.ts",

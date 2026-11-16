@@ -371,50 +371,109 @@ async function post(url, jar, form, options, ctx, customHeader) {
     });
 }
 
-async function postFormData(url, jar, form, qs, options, ctx) {
-    var headers = getHeaders(url, options, ctx);
-    const body = new FormData();
-    form = cleanObject(form);
-    for (const key in form) {
-        body.append(key, form[key]);
+function isFormData(obj) {
+    return obj instanceof FormData;
+}
+
+// A form value may be wrapped in { __formDataOptions: true, value, options }
+// so per-field options (filename, knownLength, contentType) survive.
+function appendFormField(body, key, value) {
+    if (value && value.__formDataOptions) {
+        body.append(key, value.value, value.options);
+    } else {
+        body.append(key, value);
     }
-    Object.assign(headers, body.getHeaders());
+}
 
-    var op = {
-        headers: headers,
-        timeout: {
-            request: 120000,  // 2 minutes for file uploads
-            response: 60000
-        },
-        method: "POST",
-        body: body,
-        cookieJar: jar,
-        throwHttpErrors: false,
-        decompress: true,
-        agent: getAgent(url),
-        retry: {
-            limit: 3,
-            methods: ['POST'],
-            statusCodes: [408, 413, 429, 500, 502, 503, 504]
+function isReplayableFormValue(value) {
+    return (
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean" ||
+        Buffer.isBuffer(value) ||
+        (value && value.__formDataOptions && isReplayableFormValue(value.value))
+    );
+}
+
+function isRetryableTransportError(err) {
+    const code = String((err && err.code) || "");
+    const message = String((err && err.message) || "");
+    return (
+        code === "ERR_GOT_REQUEST_ERROR" ||
+        code === "ECONNRESET" ||
+        code === "EPIPE" ||
+        code === "ETIMEDOUT" ||
+        code === "EAI_AGAIN" ||
+        /stream|socket hang up|aborted/i.test(message)
+    );
+}
+
+async function postFormData(url, jar, form, qs, options, ctx) {
+    // `form` may be a plain object (legacy) or a factory that returns a fresh
+    // plain object / FormData. Multipart bodies are one-shot: retrying a
+    // consumed body uploads an empty request and Facebook replies 400. A
+    // factory lets every attempt build a complete body again.
+    const formFactory = typeof form === "function" ? form : null;
+    const staticForm = formFactory ? null : (cleanObject(form) || {});
+    const replayable = formFactory
+        ? true
+        : (function () {
+              if (isFormData(staticForm)) return false;
+              return Object.keys(staticForm).every(function (key) {
+                  return isReplayableFormValue(staticForm[key]);
+              });
+          })();
+    // Used by parseAndCheckLogin's 5xx retry to rebuild a complete body.
+    const rebuildForm = formFactory || (replayable ? function () { return staticForm; } : null);
+
+    const buildBody = function () {
+        const source = formFactory ? formFactory() : staticForm;
+        const body = isFormData(source) ? source : new FormData();
+        if (!isFormData(source)) {
+            const fields = cleanObject(source);
+            for (const key in fields) appendFormField(body, key, fields[key]);
         }
+        if (rebuildForm) {
+            try { body._nexusFormFactory = rebuildForm; } catch (_) { }
+        }
+        return body;
     };
-    if (qs) op.searchParams = cleanObject(qs);
 
-    return got(url, op).then(function (res) {
-        saveCookies(jar, ctx)(res);
-        return res;
-    }).catch(function (err) {
-        // Retry with longer timeout on stream errors
-        if (err.code === 'ERR_GOT_REQUEST_ERROR' || err.message?.includes('stream')) {
-            log.warn("postFormData", "Retrying upload with extended timeout...");
-            op.timeout = { request: 180000, response: 120000 };
-            return got(url, op).then(function (res) {
-                saveCookies(jar, ctx)(res);
-                return res;
-            });
+    const send = function (timeout) {
+        const body = buildBody();
+        const headers = getHeaders(url, options, ctx);
+        Object.assign(headers, body.getHeaders());
+
+        const op = {
+            headers: headers,
+            timeout: timeout,
+            method: "POST",
+            body: body,
+            cookieJar: jar,
+            throwHttpErrors: false,
+            decompress: true,
+            agent: getAgent(url),
+            // Never let got replay a consumed multipart body. Our retry
+            // layers rebuild it from the factory instead.
+            retry: { limit: 0 }
+        };
+        if (qs) op.searchParams = cleanObject(qs);
+
+        return got(url, op).then(function (res) {
+            saveCookies(jar, ctx)(res);
+            return res;
+        });
+    };
+
+    try {
+        return await send({ request: 120000, response: 60000 });
+    } catch (err) {
+        if (replayable && isRetryableTransportError(err)) {
+            log.warn("postFormData", "Retrying upload with extended timeout and a fresh body...");
+            return send({ request: 180000, response: 120000 });
         }
         throw err;
-    });
+    }
 }
 
 function padZeros(val, len) {
@@ -1052,7 +1111,24 @@ function parseMentionData(data) {
     return rows;
 }
 
+// Some Facebook deltas encode scalar values as protobuf wrappers, e.g.
+// { asLong: "615..." } or { asNumber: "0" }. Unwrap those before parsing,
+// otherwise Number() on the wrapper object yields NaN and the mention
+// loses its offset/length (and the ID field yields the wrapper itself).
+function unwrapMentionScalar(value) {
+    if (value && typeof value === "object") {
+        if (value.asLong !== undefined) return unwrapMentionScalar(value.asLong);
+        if (value.asNumber !== undefined) return unwrapMentionScalar(value.asNumber);
+        if (value.long !== undefined) return unwrapMentionScalar(value.long);
+        var keys = Object.keys(value);
+        if (keys.length === 1 && keys[0] === "value")
+            return unwrapMentionScalar(value.value);
+    }
+    return value;
+}
+
 function normalizeMentionID(id) {
+    id = unwrapMentionScalar(id);
     if (id === undefined || id === null) return null;
     if (typeof id === "object") {
         return normalizeMentionID(
@@ -1085,17 +1161,65 @@ function firstMentionValue(row, keys) {
 }
 
 /**
+ * Newer Facebook MQTT deltas sometimes omit `data.prng` and instead store
+ * the mention map in the protobuf-ish
+ * `messageMetadata.data.data.Gb.asMap.data` container. Each entry looks
+ * like { asMap: { data: { id: { asLong }, offset: { asLong },
+ * length: { asLong } } } }. A parser that only reads data.prng/mentions
+ * sees no rows for this shape, so every incoming mention arrives empty.
+ * Accepts both messageMetadata.data.Gb... and
+ * messageMetadata.data.data.Gb... (the latter is what FB sends today).
+ */
+function parseMetadataMentions(metadata) {
+    var rows = [];
+    try {
+        var root = metadata && metadata.data;
+        if (typeof root === "string") {
+            try { root = JSON.parse(root); } catch (_) { return rows; }
+        }
+        var nested = root && root.data !== undefined ? root.data : root;
+        var map = nested && nested.Gb && nested.Gb.asMap && nested.Gb.asMap.data;
+        if (!map || typeof map !== "object") return rows;
+
+        var keys = Object.keys(map);
+        for (var i = 0; i < keys.length; i++) {
+            var entry = map[keys[i]];
+            var item = entry && entry.asMap && entry.asMap.data;
+            if (!item || typeof item !== "object") continue;
+            var id = unwrapMentionScalar(item.id);
+            var offset = unwrapMentionScalar(item.offset);
+            var length = unwrapMentionScalar(item.length);
+            if (id === undefined || offset === undefined || length === undefined)
+                continue;
+            rows.push({
+                id: id,
+                offset: offset,
+                length: length,
+                name: unwrapMentionScalar(item.name)
+            });
+        }
+    } catch (_) { }
+    return rows;
+}
+
+/**
  * Build the `mentions` map used by all commands.  Keys are always clean,
  * prefix-free user IDs.  Values are the exact substring from the body so
  * outgoing tags (tag + offset) match what the user typed.
  *
  * `extra` lets callers add another payload (for example `m.mentions` next to
- * `m.data.prng`) without calling this function twice.
+ * `m.data.prng`) without calling this function twice. `metadata` adds the
+ * messageMetadata fallback used by newer Facebook deltas.
  */
-function formatMentions(data, body, extra) {
+function formatMentions(data, body, extra, metadata) {
     var text = typeof body === "string" ? body : "";
     var sources = [data, extra];
     var rows = parseMentionData(sources);
+    if (metadata) {
+        var metadataRows = parseMetadataMentions(metadata);
+        for (var r = 0; r < metadataRows.length; r++)
+            rows.push(metadataRows[r]);
+    }
     var mentions = {};
     for (var i = 0; i < rows.length; i++) {
         var row = rows[i];
@@ -1117,8 +1241,8 @@ function formatMentions(data, body, extra) {
         ]));
         if (!id || id === "0") continue;
 
-        var offset = Number(firstMentionValue(row, ["o", "offset", "fromIndex", "start", "position"]));
-        var length = Number(firstMentionValue(row, ["l", "length", "len", "size"]));
+        var offset = Number(unwrapMentionScalar(firstMentionValue(row, ["o", "offset", "fromIndex", "start", "position"])));
+        var length = Number(unwrapMentionScalar(firstMentionValue(row, ["l", "length", "len", "size"])));
         var tag = "";
         if (Number.isFinite(offset) && offset >= 0) {
             if (Number.isFinite(length) && length > 0)
@@ -1160,7 +1284,7 @@ function formatDeltaMessage(m) {
                 return Object.assign({}, v, { type: "unknown", error: error });
             }
         }),
-        mentions: formatMentions(m.data, body, m.mentions),
+        mentions: formatMentions(m.data, body, m.mentions, md),
         timestamp: md.timestamp,
         isGroup: !!threadKey.threadFbId,
         participantIDs: Array.isArray(m.participants) ? m.participants : []
@@ -1469,7 +1593,16 @@ function makeDefaults(html, userID, ctx) {
         return get(url, jar, mergeWithDefaults(qs), ctx.globalOptions, ctxx || ctx);
     }
     function postFormDataWithDefault(url, jar, form, qs, ctxx) {
-        return postFormData(url, jar, mergeWithDefaults(form), mergeWithDefaults(qs), ctx.globalOptions, ctxx || ctx);
+        // A form factory must stay a factory so retries can rebuild the
+        // multipart body instead of reusing a consumed stream.
+        const formWithDefaults =
+            typeof form === "function"
+                ? function () {
+                      const built = form();
+                      return isFormData(built) ? built : mergeWithDefaults(built);
+                  }
+                : mergeWithDefaults(form);
+        return postFormData(url, jar, formWithDefaults, mergeWithDefaults(qs), ctx.globalOptions, ctxx || ctx);
     }
     return {
         get: getWithDefaults,
@@ -1519,11 +1652,26 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
                 const contentType = requestHeaders?.["content-type"]?.split(";")[0];
 
                 return delay(retryTime)
-                    .then(() =>
-                        contentType === "multipart/form-data"
-                            ? defaultFuncs.postFormData(url, ctx.jar, requestBody, {})
-                            : defaultFuncs.post(url, ctx.jar, requestBody)
-                    )
+                    .then(() => {
+                        if (contentType === "multipart/form-data") {
+                            // A multipart body is one-shot. Only retry when
+                            // postFormData gave us a factory that can rebuild
+                            // it; replaying a consumed stream uploads an empty
+                            // body and Facebook answers 400.
+                            const formFactory = requestBody && requestBody._nexusFormFactory;
+                            if (typeof formFactory !== "function") {
+                                throw {
+                                    message: "Cannot retry a consumed multipart upload body.",
+                                    statusCode: data.statusCode,
+                                    res: data.body,
+                                    error: "Non-replayable multipart body.",
+                                    sourceCall
+                                };
+                            }
+                            return defaultFuncs.postFormData(url, ctx.jar, formFactory, {});
+                        }
+                        return defaultFuncs.post(url, ctx.jar, requestBody);
+                    })
                     .then(parseAndCheckLogin(ctx, defaultFuncs, retryCount, sourceCall));
             }
             // --- New: Explicit 3xx redirect handling (302 login checkpoint, etc.) ---
@@ -2387,6 +2535,8 @@ module.exports = {
     formatDeltaEvent,
     formatDeltaMessage,
     formatMentions,
+    parseMetadataMentions,
+    unwrapMentionScalar,
     normalizeMentionID,
     parseMentionData,
     formatProxyPresence,
