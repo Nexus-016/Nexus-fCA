@@ -48,7 +48,7 @@ function getRandomReconnectTime() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MBASIC FALLBACK FOR SeqID (When Graph API fails with 1357004)
+// MBASIC FALLBACK FOR SeqID (transient Graph API failures ONLY)
 // ═══════════════════════════════════════════════════════════════
 async function getSeqIdFromMbasic(defaultFuncs, ctx) {
   try {
@@ -169,13 +169,41 @@ function fetchSeqID(defaultFuncs, api, ctx, callback, retryCount = 0) {
     .catch(async (err) => {
       const errorType = err.type || 'unknown_error';
       const isAuthError = errorType === 'auth_error' || (utils.getType(err) === "Object" && err.error === "Not logged in");
-      
-      // Check if it's error 1357004
-      const is1357004 = err?.res?.__ar === 1 && err?.res?.error === 1357004;
 
-      // Try mbasic fallback for 1357004 or auth errors on first attempt
-      if ((is1357004 || isAuthError) && retryCount === 0) {
-        log.warn("fetchSeqID", "Graph API failed with 1357004, trying mbasic fallback...");
+      // NEXUS CALM-CHECKPOINT (v5.2.4): error 1357004 is an ACCOUNT-level
+      // enforcement signal (session flagged / checkpoint required), not a
+      // transient Graph failure. The mbasic fallback must never mask it:
+      // its synthetic SeqID is a timestamp, not a real sync_sequence_id,
+      // and treating the enforcement state as "success" made the reconnect
+      // path retry the MQTT handshake immediately and forever (no backoff —
+      // the success path skips scheduleAdaptiveReconnect), hammering
+      // Facebook with invalid session handshakes every few seconds.
+      // Repeated automated handshakes on a flagged account are exactly the
+      // pattern that escalates a soft block into a hard checkpoint.
+      // Stop quietly instead: loggedIn = false hands the session to the
+      // relogin contract (refreshFb_dtsg once -> canonical "Not logged in."
+      // -> GoatBot restart -> patient login retries with the health server
+      // bound), which is the calm path. No mbasic, no Graph retries.
+      const is1357004 = (function () {
+        try {
+          if (err && err.res && err.res.__ar === 1 && err.res.error === 1357004) return true;
+          const list = Array.isArray(err && err.error)
+            ? err.error
+            : (err && err.error && typeof err.error === "object" ? [err.error] : []);
+          return list.some(function (e) {
+            return e && (e.code === 1357004 || e.error === 1357004 || e.errorCode === 1357004);
+          });
+        } catch (_) { return false; }
+      })();
+      if (is1357004) {
+        log.error("fetchSeqID", "Graph API error 1357004 — account flagged/checkpointed by Facebook. Skipping the mbasic synthetic fallback; handing over to the relogin contract.");
+        ctx.loggedIn = false;
+        return callback(err);
+      }
+
+      // Transient auth failure only: try the mbasic fallback once.
+      if (isAuthError && retryCount === 0) {
+        log.warn("fetchSeqID", "Graph API auth failure, trying mbasic fallback...");
         try {
           const mbasicSeqId = await getSeqIdFromMbasic(defaultFuncs, ctx);
           ctx.lastSeqId = mbasicSeqId;

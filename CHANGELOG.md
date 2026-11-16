@@ -1,5 +1,44 @@
 # Changelog
 
+## [5.2.4] - 2026-11-17 - 🧯 CALM CHECKPOINT HANDLING (1357004)
+
+Live-incident fix: when Facebook enforces on the account (flag /
+checkpoint), the SeqID fallback masked the enforcement state as
+"success" and the reconnect path hammered the MQTT broker with invalid
+session handshakes every few seconds — the exact automated pattern
+that escalates a soft block into a hard checkpoint.
+
+### Root cause (observed live on Koyeb)
+The Graph API returned the classic `{ __ar: 1, error: 1357004 }`
+enforcement payload; `parseAndCheckLogin` threw it as `auth_error` and
+the mbasic fallback treated it like a transient failure: it fetched an
+mbasic page whose HTML still embeds the account id (false-positive
+"alive" proof) and returned a **synthetic SeqID** (`Date.now()`), so
+`fetchSeqID` reported success, the error handler reconnected
+**immediately** (the success path skips the adaptive backoff), the
+broker answered CONNACK "Server unavailable", and the cycle repeated
+without any delay. Each cycle also re-fetched mbasic — a flagged
+session being hammered at ~12 attempts/minute.
+
+### Fixed
+- **1357004 short-circuit (`src/listenMqtt.js`)**: any 1357004 (both
+  the `{ __ar: 1, error: 1357004 }` payload shape and `code` /
+  `error` / `errorCode` fields inside the `o0.errors` array shape) is
+  account-level enforcement — the mbasic fallback and the Graph retry
+  loop are both skipped, `ctx.loggedIn` is set to false and the error
+  is handed to the relogin contract: one `refreshFb_dtsg` recovery
+  attempt, then the canonical `"Not logged in."` emission → GoatBot
+  restart → patient login retries (15/30/60 min, health server bound).
+- The mbasic fallback is documented and gated as **transient-only**;
+  the misleading "failed with 1357004" log for plain auth errors now
+  reads "Graph API auth failure".
+
+### Verified
+- 200 checks green in the bot copy: 63-check contract suite (5 new
+  checks: short-circuit ordering, no mbasic masking, dead-session
+  handover, errors-array detection, transient-only header),
+  103-check upstream-compat, 34-check regression; standalone 103/103.
+
 ## [5.2.3] - 2026-11-17 - 🏷️ MENTION FIX (NEW FACEBOOK METADATA SHAPE)
 
 Fixes `event.mentions` arriving empty for every incoming message with a

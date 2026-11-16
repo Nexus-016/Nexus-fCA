@@ -2,7 +2,7 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v5.2.3 — GOAT Update
+# Nexus-FCA v5.2.4 — GOAT Update
 
 [![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
 [![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
@@ -430,6 +430,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **5.2.4** | 🧯 Calm checkpoint handling: Graph error 1357004 (account flagged) no longer masked by the mbasic synthetic SeqID — no more backoff-less MQTT hammering on an enforced session; the relogin contract takes over |
 | **5.2.3** | 🏷️ Mention fix: parses the new `messageMetadata.data.Gb.asMap.data` shape (protobuf `asLong` scalars) so `event.mentions` is never empty again; multipart upload retry rebuilds the body instead of replaying a consumed stream |
 | **5.2.2** | 🔐 Vault hardening: quota guard (vault sees only real cookie changes, max 1 PUT / 5 min), health server binds on the lock path (Koyeb kill-loop fix), vault push on login success |
 | **5.2.1** | 🔐 Session Vault: refreshed sessions mirrored to `NEXUS_SESSION_VAULT_URL` (save) + freshest-copy restore at boot, failed-session fingerprinting — fixes the Koyeb cookie-death restart loop |
