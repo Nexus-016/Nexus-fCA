@@ -1288,6 +1288,16 @@ const GENERIC_LS_ACK_TYPES = new Set([
   "change_thread_image",
   "create_poll",
   "change_thread_emoji",
+  // v5.3 parity ops (mute, rename, remove-participant, create-group,
+  // accept-message-request, poll-update): the response for our request_id
+  // is itself the success signal — the raw payload passes through for
+  // tooling (createNewGroup walks it for the optimistic→real thread map).
+  "mute_thread",
+  "rename_thread",
+  "remove_participant",
+  "create_group",
+  "accept_message_request",
+  "update_poll",
 ]);
 
 function getTaskResponseData(taskType, payload) {

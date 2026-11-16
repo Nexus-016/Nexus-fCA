@@ -1,5 +1,72 @@
 # Changelog
 
+## [5.3.0] - 2026-11-17 - ⚡ LIGHTSPEED PARITY SPRINT II (6 NEW NATIVE OPS)
+
+Six more thread operations now run through the native LightSpeed task
+engine — the same /ls_req path the Messenger app itself uses — with the
+proven web endpoints kept as silent, idempotent fallbacks. All task
+shapes are taken from genuine references (mautrix/meta
+pkg/messagix/socket/threads.go + its live usage sites, messagix-js
+dist), not guessed.
+
+### New native paths (Lightspeed first, web fallback)
+- **muteThread (label 144, queue = threadKey)**:
+  `{thread_key, mailbox_type: 0, mute_expire_time_ms, sync_group: 1}`.
+  Unmute (0) and timed mutes (absolute epoch-ms expiry, matching the LS
+  threads-table timestamp convention and the LSUpdateThreadMuteSetting
+  echo) take the task; "permanent" (-1) has no documented task-side
+  sentinel and keeps the proven `change_mute_thread.php` endpoint. The
+  `LS_MUTE_ABSOLUTE` switch in muteThread.js turns the timed-mute
+  experiment off in one line if live verification prefers durations.
+- **setTitle (label 32, queue = threadKey)**: `{thread_key, thread_name,
+  sync_group: 1}` — live usage verified in mautrix
+  handlematrix.go:789-793; web `set_thread_name/` fallback intact
+  (including the 1545003 single-user-chat error).
+- **removeUserFromGroup (label 140, queue "remove_participant_v2")**:
+  `{thread_id, contact_id}` — note the field names (this task does NOT
+  use thread_key); web `chat/remove_participants` fallback intact.
+- **createNewGroup (label 130, queue = optimistic thread id)**:
+  `{participants, send_payload: {thread_id, otid, source: 0, send_type:
+  8}}` with locally generated epoch ids and invited members only (the
+  executing account is the implicit actor, as in mautrix
+  startchat.go:82-90). The ack carries the optimistic→real thread map
+  (LSReplaceOptimisticThread), walked out of the raw response so the
+  callback returns the REAL group id. Creation is not idempotent: the
+  web GraphQL fallback runs only when the task provably never ran; on an
+  ack timeout an explicit unknown-outcome error prevents duplicate
+  groups.
+- **handleMessageRequest accept (label 66, queue "message_request")**:
+  `{thread_key, sync_group: 1, ig_folder: null}` per mautrix
+  handlematrix.go:778-781. Declining has no documented task and keeps
+  the web `move_thread.php` path.
+- **votePoll (NEW API, label 164, queue "poll_update")**:
+  `{thread_key, poll_id, added_options: [], selected_options,
+  sync_group: 1}` — option ids as in the receive-side LSAddPollVote.
+  Lightspeed-native (no web endpoint exists in this library for
+  voting); failures are reported to the caller, never masked.
+- **editMessage normalized (label 742)**: the v5.2.x inline publisher
+  now routes through the shared publishLsTask engine (consistent ack
+  routing, BigInt epoch ids replacing the old parseInt precision loss)
+  while keeping the PendingEdits cap, TTL and bounded resend watchdog.
+
+### Infrastructure
+- **getLsVersionId (NEW)**: resolves the CURRENT LightSpeed version id
+  by locating the "LSVersion" module served by messenger.com (the same
+  runtime crawl mautrix-meta performs — Facebook rotates the id with
+  deployments). Cached 6h, single-flight, and fully silent: any failure
+  resolves with the last-known generic id so task publishing never
+  errors on lookup.
+- **Ack routing**: mute/rename/remove-participant/create-group/
+  accept-message-request/poll-update join the generic /ls_resp ack set
+  in listenMqtt (raw payload passthrough for tooling).
+
+### Verified
+- All 9 touched/new files pass syntax checks; contract suite extended
+  with a v5.3 shape section (labels, payload fields, queue names,
+  fallback preservation, duplicate-creation guard). Web fallbacks are
+  idempotent on re-application; no fallback fires on an unknown-outcome
+  create.
+
 ## [5.2.4] - 2026-11-17 - 🧯 CALM CHECKPOINT HANDLING (1357004)
 
 Live-incident fix: when Facebook enforces on the account (flag /
