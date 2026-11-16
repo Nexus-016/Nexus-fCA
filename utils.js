@@ -1748,6 +1748,50 @@ function saveAppState(ctx) {
                 log.verbose("utils", "External appstate sync failed: " + err.message);
             });
         }
+
+        // NEXUS SESSION VAULT (save side): mirror every refreshed session to
+        // NEXUS_SESSION_VAULT_URL so a restart on an ephemeral host boots
+        // with the FRESHEST cookies instead of the frozen APPSTATE_JSON
+        // bootstrap. The restore side lives in the bot
+        // (bot/login/sessionVault.js) — the library cannot require bot code,
+        // so the small header/method contract is mirrored here:
+        // token -> Authorization Bearer + X-Master-Key; PUT for jsonbin-style
+        // stores with a POST fallback (payload shape { appState, savedAt,
+        // source }). Fire-and-forget: a vault outage must never delay the
+        // runtime save.
+        if (process.env.NEXUS_SESSION_VAULT_URL) {
+            try {
+                const axios = require('axios');
+                const vaultUrl = process.env.NEXUS_SESSION_VAULT_URL;
+                const vaultHeaders = { 'Content-Type': 'application/json', 'User-Agent': 'Nexus-SessionVault/1.0' };
+                if (process.env.NEXUS_SESSION_VAULT_TOKEN) {
+                    vaultHeaders['Authorization'] = 'Bearer ' + process.env.NEXUS_SESSION_VAULT_TOKEN;
+                    vaultHeaders['X-Master-Key'] = process.env.NEXUS_SESSION_VAULT_TOKEN;
+                }
+                const vaultPayload = { appState: appState, savedAt: new Date().toISOString(), source: 'nexus-fca' };
+                const forcedMethod = (process.env.NEXUS_SESSION_VAULT_METHOD || '').toUpperCase();
+                const preferPut = forcedMethod === 'PUT' || (!forcedMethod && /jsonbin\.io/.test(vaultUrl));
+                const vaultMethods = preferPut ? ['put', 'post'] : ['post', 'put'];
+                (async () => {
+                    for (const method of vaultMethods) {
+                        try {
+                            const res = await axios({
+                                url: vaultUrl,
+                                method: method,
+                                data: vaultPayload,
+                                headers: vaultHeaders,
+                                timeout: 10000,
+                                validateStatus: () => true
+                            });
+                            if (res && res.status < 400) return;
+                        } catch (_) { }
+                    }
+                    log.verbose("utils", "Session vault save failed (all methods)");
+                })();
+            } catch (vaultErr) {
+                log.verbose("utils", "Session vault save failed: " + (vaultErr && vaultErr.message ? vaultErr.message : vaultErr));
+            }
+        }
     } catch (e) {
         log.verbose("utils", "Auto-save appstate failed: " + e.message);
     }

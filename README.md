@@ -2,7 +2,7 @@
   <img src="https://i.ibb.co/Sk61FGg/Dragon-Fruit-1.jpg" alt="Nexus-FCA" width="480" />
 </p>
 
-# Nexus-FCA v5.2.0 — GOAT Update
+# Nexus-FCA v5.2.1 — GOAT Update
 
 [![npm version](https://img.shields.io/npm/v/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
 [![npm downloads](https://img.shields.io/npm/dm/nexus-fca)](https://www.npmjs.com/package/nexus-fca)
@@ -13,6 +13,12 @@
 > Full GoatBot V2 compatibility, cookie jar integrity, session-file protection, UA fingerprint lock, anti-lock session guard, MQTT v5, delivery fallback chain, bounded-memory queue architecture.
 
 ---
+
+## What's New in v5.2.1 (Session Vault — Cookie-Death Fix)
+
+- **Your session stops dying on restart**: every refreshed cookie state is mirrored to a `NEXUS_SESSION_VAULT_URL` endpoint (jsonbin-style stores or any HTTP JSON endpoint), and the boot flow restores the freshest copy instead of the frozen `APPSTATE_JSON` secret — Facebook rotates `xs`/`fr` while the bot runs, which is what killed sessions on Koyeb.
+- **Setup**: host a private JSON store (e.g. a private jsonbin bin), set `NEXUS_SESSION_VAULT_URL` (+ optional `NEXUS_SESSION_VAULT_TOKEN`), seed it once with a fresh cookie export, done — from then on the vault is the source of truth and restarts never replay dead cookies.
+- **Smart failover**: if a cookie login fails, the bot fingerprints the exact copy that failed and alternates sources (vault vs bootstrap) on the retry loop instead of hammering the same dead session.
 
 ## What's New in v5.2.0 (Lightspeed-2 — Full App Surface)
 
@@ -424,6 +430,7 @@ const login = require('nexus-fca');
 
 | Version | Focus |
 |---------|-------|
+| **5.2.1** | 🔐 Session Vault: refreshed sessions mirrored to `NEXUS_SESSION_VAULT_URL` (save) + freshest-copy restore at boot, failed-session fingerprinting — fixes the Koyeb cookie-death restart loop |
 | **5.2.0** | ⚡ Lightspeed-2: all thread ops (unsend/delete/nickname/image/poll/emoji/participants/admin) + full message surface (mentions/locations/attachments) through `/ls_req`, shared task engine, idempotent fallbacks |
 | **5.1.0** | ⚡ Lightspeed send: messages go through the Messenger app's `/ls_req` task channel (text/sticker/reply), automatic web fallback, tolerant ack extraction |
 | **5.0.6** | Deep audit: atomic appstate writes (crash-proof), real `{signal}` refresh semantics, CookieRefresher disposal on re-login |

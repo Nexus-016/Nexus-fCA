@@ -1,5 +1,38 @@
 # Changelog
 
+## [5.2.1] - 2026-11-16 - 🔐 SESSION VAULT (COOKIE-DEATH FIX)
+
+Fixes the recurring "cookie dies after every restart" loop on ephemeral
+hosts (Koyeb): the boot-time `APPSTATE_JSON` secret is a frozen snapshot,
+and Facebook rotates the session cookies (`xs`/`fr`) while the bot runs —
+so every restart replayed an already-dead session and got the login page.
+
+### Added
+- **Session Vault save side (`utils.js`)**: every refreshed session state
+  is mirrored to `NEXUS_SESSION_VAULT_URL` (fire-and-forget, never delays
+  or blocks the runtime save). Token is sent as both
+  `Authorization: Bearer` and `X-Master-Key` (jsonbin-style stores);
+  method is PUT for jsonbin URLs / POST otherwise (both with automatic
+  fallback to the other), payload shape `{ appState, savedAt, source }`.
+- **Session Vault restore side (bot, `bot/login/sessionVault.js`)**: at
+  boot the login flow prefers the freshest usable vault copy over the
+  frozen env snapshot; accepted bodies are a plain cookie array (manual
+  seed), `{ appState, savedAt }`, `{ record: [...] }` (jsonbin) and
+  `{ record: { appState } }`. Env/file stays the fallback and
+  `NEXUS_SESSION_VAULT_PREFER=env` disables the override.
+- **Failed-session fingerprinting (bot, `login.js`)**: when a cookie
+  login fails, the exact session copy that failed is fingerprinted and
+  the retry loop alternates to the other copy (vault vs bootstrap)
+  instead of re-hammering the same dead cookies. A successful login
+  clears the bookkeeping.
+
+### Verified
+- 176 checks green in the bot copy (39-check contract suite now covering
+  the full vault contract — headers, all unwrap shapes, validity,
+  fingerprints, fetch/save paths and both wiring sides — plus the
+  103-check upstream-compat and 34-check regression suites), standalone
+  103/103.
+
 ## [5.2.0] - 2026-11-16 - ⚡ LIGHTSPEED-2 (FULL APP-SURFACE MIGRATION)
 
 Pushed the Messenger-app surface as far as the protocol supports: every
