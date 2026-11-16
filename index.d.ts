@@ -359,6 +359,7 @@ declare module 'nexus-fca' {
         createNewGroup: (participantIDs: string[], groupTitle?: string, callback?: (err: Error, threadID: string) => void) => Promise<string>,
         createPoll: (title: string, threadID: string, options?: { [item: string]: boolean }, callback?: (err?: Error) => void) => Promise<void>,
         createPollMqtt: (title: string, options?: { [item: string]: boolean }, threadID: string, callback?: (err?: Error) => void) => Promise<void>,
+        votePoll: (threadID: string, pollID: string, optionIDs: string[], callback?: (err?: Error) => void) => Promise<void>,
         deleteMessage: (messageOrMessages: string | string[], callback?: (err?: Error) => void) => Promise<void>,
         deleteThread: (threadOrThreads: string | string[], callback?: (err?: Error) => void) => Promise<void>,
         editMessage: (text: string, messageID: string, callback?: (err?: Error) => void) => Promise<void>,

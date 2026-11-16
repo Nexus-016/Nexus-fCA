@@ -1,25 +1,26 @@
 # Deprecated Features & Upgrade Path
 
-## Removed Files (Waste Code)
-The following files were removed as they were either broken, redundant, or used legacy APIs that are no longer reliable:
+## Removed Files
+The following files were removed because they were redundant, broken, or relied on legacy APIs that are no longer reliable:
 
-- `src/changeAvatarV2.js`: Incomplete implementation. Use `changeAvatar.js` instead.
-- `src/getThreadListDeprecated.js`: Legacy Mercury API. Use `getThreadList.js` (GraphQL).
-- `src/getThreadInfoDeprecated.js`: Legacy Mercury API. Use `getThreadInfo.js` (GraphQL).
-- `src/getThreadHistoryDeprecated.js`: Legacy Mercury API. Use `getThreadHistory.js` (GraphQL).
+- `src/getThreadListDeprecated.js`: Legacy Mercury API. Use `getThreadList.js` (GraphQL) instead.
+- `src/getThreadInfoDeprecated.js`: Legacy Mercury API. Use `getThreadInfo.js` (GraphQL) instead.
+- `src/getThreadHistoryDeprecated.js`: Legacy Mercury API. Use `getThreadHistory.js` (GraphQL) instead.
 
-## Deprecated Features (To Be Upgraded)
+## Deprecated Methods
 
 ### `listenNotification`
-- **Status**: Deprecated
-- **Reason**: Uses inefficient HTTP polling (every 60s).
-- **Upgrade**: Use `api.listenRealtime` (WebSocket) for instant notifications.
+- **Status**: Deprecated.
+- **Reason**: Uses inefficient HTTP polling (every 60 seconds).
+- **Replacement**: `api.listenRealtime` (WebSocket) for instant notifications.
+
+## Upgraded Components
 
 ### `utils.js` (HTTP Client)
-- **Status**: ✅ Upgraded
-- **Reason**: The legacy `request` library was deprecated.
-- **Update**: Successfully migrated to `got` (and `axios` for specific tasks) to support HTTP/2 and improve performance/safety.
+- **Status**: Upgraded.
+- **Reason**: The legacy `request` library is unmaintained.
+- **Change**: Migrated to `got` (and `axios` for specific tasks) for HTTP/2 support and improved safety.
 
-## Unused Functions Removed
-- `generateAccessiblityCookie`: Not used in the codebase.
-- `getAccessFromBusiness`: Experimental/Unused.
+## Removed Internal Functions
+- `generateAccessiblityCookie`: Unused in the codebase.
+- `getAccessFromBusiness`: Experimental and unused.

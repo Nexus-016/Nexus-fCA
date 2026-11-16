@@ -142,7 +142,7 @@ api.sendMessageMqtt({
     attachment: fs.createReadStream('./file.pdf')
 }, threadID);
 
-// Replaying to a message via MQTT
+// Replying to a message via MQTT
 api.sendMessageMqtt('Replying fast!', threadID, messageID);
 ```
 
@@ -396,6 +396,12 @@ api.createPost({
 
 // Create poll
 api.createPoll('What\'s your favorite color?', ['Red', 'Blue', 'Green'], threadID);
+
+// Vote on a poll (option ids come from the poll message data)
+api.votePoll(threadID, pollID, [optionId], (err) => {
+    if (err) return console.error(err);
+    console.log('Vote recorded');
+});
 
 // Set post reaction
 api.setPostReaction(postID, 'LOVE'); // LOVE, LIKE, WOW, HAHA, SAD, ANGRY
@@ -852,11 +858,16 @@ startBot();
 ## 📖 Additional Resources
 
 - **Main Documentation**: `README.md`
-- **NPM Integration**: `npm-integration-guide.md`
-- **Login Guide**: `integrated-login-guide.md`
-- **Test Examples**: `test-*.js` files
-- **Example Bot**: `example-bot.js`
+- **Documentation Overview**: `DOCS.md`
+- **API Methods Reference**: `API-METHODS-REFERENCE.md`
+- **Usage Guide**: `USAGE-GUIDE.md`
+- **Changelog**: `CHANGELOG.md`
+- **TypeScript Definitions**: `index.d.ts`
 
 ---
 
-**🎉 You now have access to all Nexus-FCA methods and features! Build amazing Facebook bots with confidence!**
+## 🎯 Next Steps
+
+- Review `README.md` for the Session Vault, LightSpeed Task Engine and login options.
+- Consult `docs/configuration-reference.md` for the full configuration reference.
+- Check `CHANGELOG.md` for release details and behavioral notes.

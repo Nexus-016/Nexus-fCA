@@ -295,15 +295,15 @@ Full audit of the cookie-death, account-safety, GoatBot V2 compatibility, stabil
 
 ## [5.0.4] - 2026-11-14 - ✨ ADVANCED PARITY (LOCAL)
 
-Reviewed `neokex-fca`'s advanced feature set at the user's request and brought the genuinely useful ones into Nexus-fCA — **implemented locally**, unlike neokex which is a thin client that uploads every cookie and every call to its own server (`fca.neokex.xyz`).
+Brought genuinely useful advanced-parity features into Nexus-fCA — **implemented locally**: session validation, device identity and listener configuration all run on the user's own machine. Nexus-fCA deliberately keeps every session local — cookies, listeners and features never touch a third-party proxy service.
 
 ### Added
 - **`login.utils.checkLiveCookie(input, options)` (sessionless liveness probe)**: checks whether a cookie set still authenticates without creating a session and without writing anything — accepts an exported cookie array, a raw cookie string (`"c_user=...; xs=...;"`), a cookies.txt (Netscape) export, or a jar-like object; returns `{ live, accountID, reason, checkedAt }`. Evidence-based (account id + settings markup = live; a real login form = dead). Implemented locally — the cookies never leave the machine. The existing session-based `checkLiveCookie(ctx, defaultFuncs)` keeps its signature (used internally by the listener) via smart dispatch.
 - **`api.getDeviceIdentifiers()`**: the device identity the session presents — `{ deviceID, familyDeviceID, machineID }`, persisted next to the account's `appstate.json` so the fingerprint is stable across restarts. `machineID` is a stable sha256 fingerprint of the device profile.
 - **`api.setListenerOptions(options)` / `api.getListenerOptions()`**: update/read the listener option subset live (`selfListen`, `selfListenEvent`, `listenEvents`, `listenTyping`, `updatePresence`, `autoMarkDelivery`, `autoMarkRead`, `autoReconnect`, `online`, `emitReady`); returns `{ updated: string[] }`.
 
-### Note on neokex-fca
-Its "advanced" features (music stickers, effects, bump) live in a closed server engine — the published npm client contains only API metadata and uploads the user's appState to `fca.neokex.xyz` in `POST /v1/sessions`, then proxies every call. Nexus-fCA keeps every session local: cookies, listeners and features all run on the user's own machine. Its locally-listed extras (`listEffects`/`listAvatarEffects`) also resolve from the server manifest, not from the client.
+### Design note — local-first sessions
+Session features that other clients delegate to remote engines (music stickers, effects, bump) are not provided by this library: they have no public send-side protocol implementation, and shipping guessed protocol shapes is against this project's policy. Nexus-fCA keeps every session local — cookies, listeners and features all run on the user's own machine.
 
 ### Verified
 - 45-check upstream-compat suite (now covering the advanced parity surface), 34-check regression suite, 14-check contract suite — all green.
@@ -353,10 +353,10 @@ Audited the GoatBot V2 framework end-to-end (its real login flow, listener callb
 - `login({ appState }, options, cb)` — callback contract, sync `getCurrentUserID()`, `getAppState()` array, `getThreadList(9999999, null, 'INBOX')` shape (`isGroup`/`threadID`), `getThreadInfo().inviteLink`, `getUserInfo()` name shape, `message`/`message_reply` event types — all present and matching.
 - 14-check contract suite passes; previous suites re-run green.
 
-## [5.0.0] - 2026-11-14 - 🐐 GOAT UPDATE — GoatBot V2 FULL COMPATIBILITY
+## [5.0.0] - 2026-11-14 - 🤝 GOATBOT V2 FULL COMPATIBILITY
 
 ### Overview
-The GOAT update makes Nexus-FCA fully drop-in for GoatBot V2: every API method the bot calls is verified present with matching semantics, and two field-reported session/data-integrity failures are fixed at the root. 34-check verification suite passes.
+This release makes Nexus-FCA fully drop-in for GoatBot V2: every API method the bot calls is verified present with matching semantics, and two field-reported session/data-integrity failures are fixed at the root. 34-check verification suite passes.
 
 ### Fixed
 - **Cookie jar poisoning crash (critical)**: `CookieRefresher._extendCookieExpiry` assigned a UTC **string** to the `expires` field of the jar's *live* cookie objects (`getAppState` returns the jar's own cookies, not copies). tough-cookie requires `expires` to be a Date or `"Infinity"` — with a string in the jar, every later `getCookies` / `getCookieString` call failed with `TypeError: this.expires.getTime is not a function` (the sync read silently returned nothing while an unhandled rejection killed the process). Reproduced with the exact stack from the field (`matchingCookie → Cookie.expiryTime`). The refresher now assigns a real `Date`, and a new `utils.sanitizeCookieJar(jar)` repairs any cookie whose expiry lost its type using the store's `getAllCookies` (safe to run even on an already-poisoned jar). It runs before every refresher read, before every session-guard save, and the safety health-check self-heals and retries once if a read throws.
@@ -431,23 +431,23 @@ Three production-blocking session bugs are fixed and verified against live Faceb
 
 ## [4.1.0] - 2026-10-16 - 🆕 NEW + UPDATED APIs
 
-### New APIs (Nexus-এ ছিল না, এখন `api.*` হিসাবে auto-attach হয়)
-- `sendFriendRequest(userID)` - GraphQL Comet mutation দিয়ে friend request
-- `searchFriends(query)` - mutual friend + relevance sort সহ friend search
+### New APIs (not previously exposed; auto-attached as `api.*` methods)
+- `sendFriendRequest(userID)` - friend request via GraphQL Comet mutation
+- `searchFriends(query)` - friend search with mutual-friend + relevance sorting
 - `setActiveStatus(bool)` - online/offline visibility (UpdatePresenceSettingsMutation)
 - `sendButtons(ctaId, text, threadID)` - MQTT label-46 CTA/button message
 - `setProfileLock(bool)` - profile lock toggle (WemPrivateSharingMutation)
-- `setStorySeen(storyID)` - story seen mark (storiesUpdateSeenStateMutation)
-- `getThreadTheme(themeID)` / `setThreadTheme(threadID, themeFBID)` - theme read + full apply (AI-theme queues সহ)
+- `setStorySeen(storyID)` - story seen marking (storiesUpdateSeenStateMutation)
+- `getThreadTheme(themeID)` / `setThreadTheme(threadID, themeFBID)` - theme read + full apply (AI-theme queues included)
 - `note.check/create/delete/update` - Messenger Notes (Rich Status) management
-- `changeAvatarV2(imageURL, caption)` - updated avatar flow (upload + ProfileCometProfilePictureSetMutation), পুরনো `changeAvatar` untouched
+- `changeAvatarV2(imageURL, caption)` - updated avatar flow (upload + ProfileCometProfilePictureSetMutation); `changeAvatar` remains untouched
 
-### Verified already-up-to-date (কোনো change লাগেনি)
+### Verified already-up-to-date (no changes required)
 - `setMessageReaction` - doc_id `1491398900900362` confirmed, E2EE route supported.
-- `pinMessage` - pin + unpin দুটোই support করে
+- `pinMessage` - supports both pin and unpin.
 
-### Deferred (পরে)
-- AI theme generate + AI sticker pack, E2EE bridge, storyManager, OldMessage fallback, auto-update checker
+### Deferred
+- AI theme generation + AI sticker packs, E2EE bridge, storyManager, OldMessage fallback, auto-update checker
 
 ## [4.0.0] - 2026-10-16 - 🏆 MAJOR ARCHITECTURE UPGRADE
 

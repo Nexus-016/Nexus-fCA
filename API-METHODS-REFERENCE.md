@@ -1,27 +1,37 @@
-# 📋 Nexus-FCA Methods Quick Reference
+# Nexus-FCA — API Methods Reference
 
-## 🔐 Login Methods
+A quick reference for every `api.*` method. All methods from the `src/` directory are attached to the `api` object automatically.
+
+Operations marked **[LS]** run natively over the LightSpeed task channel with an automatic, idempotent web fallback (see `README.md` → LightSpeed Task Engine).
+
+## Login Methods
+
 | Method | Description | Example |
 |--------|-------------|---------|
-| `nexusLogin()` | Advanced login with ID/pass/2FA | `await nexusLogin({username, password, twofactor})` |
-| `login()` | Traditional login | `login({email, password}, callback)` |
+| `login()` | Primary login (appstate or credentials) | `await login({ appState }, { autoReconnect: true })` |
+| `nexusLogin()` | Integrated login system (username/password/2FA/appstate) | `await nexusLogin({ username, password, twofactor })` |
+| `login.utils.checkLiveCookie(input)` | Sessionless cookie liveness probe (local) | `await login.utils.checkLiveCookie(cookieArray)` |
 
-## 💬 Message Methods
+## Message Methods
+
 | Method | Description | Example |
 |--------|-------------|---------|
 | `sendMessage()` | Send text/media message | `api.sendMessage('Hello!', threadID)` |
 | `sendMessageMqtt()` | Send message via MQTT (faster) | `api.sendMessageMqtt('Hi!', threadID, [replyID])` |
-| `editMessage()` | Edit existing message | `api.editMessage('New text', messageID)` |
-| `unsendMessage()` | Delete/unsend message | `api.unsendMessage(messageID)` |
+| `editMessage()` **[LS]** | Edit an existing message (shared task engine, bounded resend) | `api.editMessage('New text', messageID)` |
+| `unsendMessage()` **[LS]** | Delete/unsend a message | `api.unsendMessage(messageID)` |
+| `deleteMessage()` **[LS]** | Delete messages for self only | `api.deleteMessage([id1, id2])` |
 | `markAsRead()` | Mark messages as read | `api.markAsRead(threadID)` |
 | `markAsDelivered()` | Mark as delivered | `api.markAsDelivered(threadID)` |
 | `markAsReadAll()` | Mark all threads as read | `api.markAsReadAll()` |
 | `markAsSeen()` | Mark as seen | `api.markAsSeen()` |
-| `setMessageReaction()` | React to message | `api.setMessageReaction('😍', messageID)` |
+| `setMessageReaction()` **[LS]** | React to a message | `api.setMessageReaction('👍', messageID)` |
 | `setMessageReactionMqtt()` | React via MQTT | `api.setMessageReactionMqtt('👍', messageID)` |
-| `pinMessage()` | Pin message in chat | `api.pinMessage(messageID)` |
+| `pinMessage()` | Pin a message | `api.pinMessage(messageID)` |
+| `OldMessage()` | Legacy HTTP send fallback | `api.OldMessage(msg, threadID)` |
 
-## 📁 Thread/Chat Methods
+## Thread/Chat Methods
+
 | Method | Description | Example |
 |--------|-------------|---------|
 | `getThreadList()` | Get list of chats | `api.getThreadList(20, null, [], callback)` |
@@ -29,117 +39,143 @@
 | `getThreadHistory()` | Get message history | `api.getThreadHistory(threadID, 50, null, callback)` |
 | `getThreadPictures()` | Get shared pictures | `api.getThreadPictures(threadID, 0, 10, callback)` |
 | `searchForThread()` | Search for chats | `api.searchForThread('name', callback)` |
-| `setTitle()` | Change chat name | `api.setTitle('New Name', threadID)` |
+| `setTitle()` **[LS]** | Change the group name | `api.setTitle('New Name', threadID)` |
 | `changeThreadColor()` | Change chat color | `api.changeThreadColor('#ff0000', threadID)` |
-| `changeThreadEmoji()` | Change chat emoji | `api.changeThreadEmoji('🎉', threadID)` |
+| `changeThreadEmoji()` **[LS]** | Change chat emoji | `api.changeThreadEmoji('🎉', threadID)` |
 | `changeArchivedStatus()` | Archive/unarchive chat | `api.changeArchivedStatus(threadID, true)` |
-| `muteThread()` | Mute/unmute chat | `api.muteThread(threadID, 3600)` |
-| `deleteThread()` | Delete chat | `api.deleteThread(threadID)` |
+| `muteThread()` **[LS]** | Mute/unmute chat — timed mutes and unmute take the native task; permanent mute (`-1`) uses the web endpoint | `api.muteThread(threadID, 3600)` |
+| `deleteThread()` **[LS]** | Delete chat | `api.deleteThread(threadID)` |
+| `changeNickname()` **[LS]** | Change a member's nickname | `api.changeNickname('Nick', threadID, userID)` |
 
-## 👥 Group Management
+## Group Management
+
 | Method | Description | Example |
 |--------|-------------|---------|
-| `createNewGroup()` | Create new group | `api.createNewGroup([userID1, userID2], 'Name', callback)` |
-| `addUserToGroup()` | Add user to group | `api.addUserToGroup(userID, threadID)` |
-| `removeUserFromGroup()` | Remove user from group | `api.removeUserFromGroup(userID, threadID)` |
-| `changeAdminStatus()` | Make/remove admin | `api.changeAdminStatus(threadID, userID, true)` |
-| `changeGroupImage()` | Change group picture | `api.changeGroupImage(stream, threadID)` |
+| `createNewGroup()` **[LS]** | Create a new group (returns the real thread id from the task ack) | `api.createNewGroup([id1, id2], 'Name', callback)` |
+| `addUserToGroup()` **[LS]** | Add a user to a group | `api.addUserToGroup(userID, threadID)` |
+| `removeUserFromGroup()` **[LS]** | Remove a user from a group | `api.removeUserFromGroup(userID, threadID)` |
+| `changeAdminStatus()` **[LS]** | Promote/demote admins | `api.changeAdminStatus(threadID, userID, true)` |
+| `changeGroupImage()` **[LS]** | Change the group picture | `api.changeGroupImage(stream, threadID)` |
+| `handleMessageRequest()` **[LS]** | Accept/decline a message request (accept takes the native task) | `api.handleMessageRequest(threadID, true)` |
 
-## 👤 User Methods
+## User Methods
+
 | Method | Description | Example |
 |--------|-------------|---------|
 | `getUserInfo()` | Get user information | `api.getUserInfo(userID, callback)` |
-| `getCurrentUserID()` | Get bot's user ID | `const myID = api.getCurrentUserID()` |
-| `getUserID()` | Get user ID by username | `api.getUserID('username', callback)` |
-| `getAvatarUser()` | Get user avatar URL | `api.getAvatarUser(userID, callback)` |
+| `getCurrentUserID()` | Get the bot's user ID | `api.getCurrentUserID()` |
+| `getUserID()` | Resolve a user ID from a profile link (fully local) | `api.getUserID('https://facebook.com/username', callback)` |
+| `getAvatarUser()` | Get a user's avatar URL | `api.getAvatarUser(userID, callback)` |
+| `getDeviceIdentifiers()` | Stable device identity `{ deviceID, familyDeviceID, machineID }` | `api.getDeviceIdentifiers()` |
 | `changeUsername()` | Change username | `api.changeUsername('new_username')` |
 | `changeBio()` | Change bio | `api.changeBio('New bio')` |
 | `changeAvatar()` | Change profile picture | `api.changeAvatar(stream)` |
-| `changeAvatarV2()` | Change avatar (enhanced) | `api.changeAvatarV2(stream)` |
+| `changeAvatarV2()` | Change avatar (updated flow) | `api.changeAvatarV2(imageURL, caption)` |
 | `changeCover()` | Change cover photo | `api.changeCover(stream)` |
 | `changeName()` | Change display name | `api.changeName('New Name')` |
-| `changeNickname()` | Change nickname in chat | `api.changeNickname('Nick', threadID, userID)` |
 | `setProfileGuard()` | Enable/disable profile guard | `api.setProfileGuard(true)` |
+| `setProfileLock()` | Enable/disable profile lock | `api.setProfileLock(true)` |
 
-## 👥 Friends & Social
+## Friends & Social
+
 | Method | Description | Example |
 |--------|-------------|---------|
-| `getFriendsList()` | Get friends list | `api.getFriendsList(callback)` |
-| `handleFriendRequest()` | Accept/decline friend request | `api.handleFriendRequest(userID, true)` |
-| `follow()` | Send friend request/follow | `api.follow(userID)` |
-| `unfriend()` | Remove friend | `api.unfriend(userID)` |
-| `handleMessageRequest()` | Accept/decline message request | `api.handleMessageRequest(threadID, true)` |
-| `changeBlockedStatus()` | Block/unblock user | `api.changeBlockedStatus(userID, true)` |
+| `getFriendsList()` | Get the friends list | `api.getFriendsList(callback)` |
+| `handleFriendRequest()` | Accept/decline a friend request | `api.handleFriendRequest(userID, true)` |
+| `sendFriendRequest()` | Send a friend request | `api.sendFriendRequest(userID)` |
+| `follow()` | Follow a user | `api.follow(userID)` |
+| `unfriend()` | Remove a friend | `api.unfriend(userID)` |
+| `changeBlockedStatus()` | Block/unblock a user | `api.changeBlockedStatus(userID, true)` |
 | `changeBlockedStatusMqtt()` | Block/unblock via MQTT | `api.changeBlockedStatusMqtt(userID, true)` |
 
-## 📱 Posts & Social Media
+## Posts & Social Media
+
 | Method | Description | Example |
 |--------|-------------|---------|
-| `createPost()` | Create Facebook post | `api.createPost('Hello Facebook!', callback)` |
-| `createPoll()` | Create poll in group | `api.createPoll('Question?', ['A', 'B'], threadID)` |
-| `setPostReaction()` | React to post | `api.setPostReaction(postID, 'LOVE')` |
-| `setStoryReaction()` | React to story | `api.setStoryReaction(storyID, 'LOVE')` |
-| `sendComment()` | Comment on post | `api.sendComment('Great!', postID)` |
-| `createCommentPost()` | Create comment post | `api.createCommentPost('Comment', postID)` |
+| `createPost()` | Create a Facebook post | `api.createPost('Hello!', callback)` |
+| `createPoll()` **[LS]** | Create a poll in a group | `api.createPoll('Question?', threadID, options)` |
+| `votePoll()` **[LS]** | Vote on a poll (option ids from the poll message data) | `api.votePoll(threadID, pollID, [optionId], callback)` |
+| `setPostReaction()` | React to a post | `api.setPostReaction(postID, 'LOVE')` |
+| `setStoryReaction()` | React to a story | `api.setStoryReaction(storyID, 'LOVE')` |
+| `sendComment()` | Comment on a post | `api.sendComment('Great!', postID)` |
+| `createCommentPost()` | Create a comment post | `api.createCommentPost('Comment', postID)` |
 
-## 📎 File & Media Methods
+## File & Media Methods
+
 | Method | Description | Example |
 |--------|-------------|---------|
-| `uploadAttachment()` | Upload file | `api.uploadAttachment(stream, callback)` |
-| `forwardAttachment()` | Forward attachment | `api.forwardAttachment(attachmentID, threadID)` |
-| `shareContact()` | Share contact | `api.shareContact('Message', userID, threadID)` |
-| `shareLink()` | Share link | `api.shareLink('https://example.com', threadID)` |
-| `resolvePhotoUrl()` | Get photo URL | `api.resolvePhotoUrl(photoID, callback)` |
+| `uploadAttachment()` | Upload a file | `api.uploadAttachment(stream, callback)` |
+| `forwardAttachment()` | Forward an attachment | `api.forwardAttachment(attachmentID, threadID)` |
+| `shareContact()` | Share a contact | `api.shareContact('Message', userID, threadID)` |
+| `shareLink()` | Share a link | `api.shareLink('https://example.com', threadID)` |
+| `resolvePhotoUrl()` | Resolve a photo URL | `api.resolvePhotoUrl(photoID, callback)` |
 
-## 🔍 Search Methods
+## Search Methods
+
 | Method | Description | Example |
 |--------|-------------|---------|
 | `searchStickers()` | Search stickers | `api.searchStickers('happy', callback)` |
-| `getEmojiUrl()` | Get emoji image URL | `api.getEmojiUrl('😍', 'large', callback)` |
+| `getEmojiUrl()` | Get an emoji image URL | `api.getEmojiUrl('😍', 'large', callback)` |
+| `searchFriends()` | Search friends | `api.searchFriends('query', callback)` |
 
-## 🌐 HTTP Methods
+## HTTP Methods
+
 | Method | Description | Example |
 |--------|-------------|---------|
 | `httpGet()` | HTTP GET request | `api.httpGet(url, {}, {}, callback)` |
 | `httpPost()` | HTTP POST request | `api.httpPost(url, data, {}, callback)` |
 | `httpPostFormData()` | POST form data | `api.httpPostFormData(url, formData, {}, callback)` |
 
-## 🔧 Advanced Features
+## Listening & Realtime
+
 | Method | Description | Example |
 |--------|-------------|---------|
-| `listenMqtt()` | Listen via MQTT | `api.listenMqtt(callback)` |
-| `stopListenMqtt()` | Stop MQTT listening | `api.stopListenMqtt()` |
-| `listenNotification()` | Listen to notifications | `api.listenNotification(callback)` |
-| `sendTypingIndicator()` | Show typing indicator | `api.sendTypingIndicator(threadID)` |
-| `listen()` | Listen to all events | `api.listen(callback)` |
+| `listen()` | Listen to all events (alias of `listenMqtt`) | `api.listen(callback)` |
+| `listenMqtt()` | MQTT listener | `api.listenMqtt(callback)` |
+| `stopListenMqtt()` / `stopListening()` | Stop the MQTT listener | `api.stopListening(cb)` |
+| `listenNotification()` | HTTP notification polling (legacy; prefer `listenRealtime`) | `api.listenNotification(callback)` |
+| `listenRealtime()` | WebSocket notifications | `api.listenRealtime(callback)` |
+| `sendTypingIndicator()` | Show/stop the typing indicator | `api.sendTypingIndicator(threadID, true)` |
+| `autoTyping()` | Toggle automatic typing before sends | `api.autoTyping(true)` |
 
-## ⚙️ Configuration
+## Configuration & Runtime
+
 | Method | Description | Example |
 |--------|-------------|---------|
-| `setOptions()` | Set API options | `api.setOptions({listenEvents: true})` |
-| `getOptions()` | Get current options | `const opts = api.getOptions()` |
-| `getCtx()` | Get bot context | `const ctx = api.getCtx()` |
-| `getAccess()` | Get access info | `const access = api.getAccess()` |
-| `getBotInitialData()` | Get initial data | `const data = api.getBotInitialData()` |
-| `getRegion()` | Get current region | `api.getRegion(callback)` |
-| `refreshFb_dtsg()` | Refresh security token | `api.refreshFb_dtsg(callback)` |
+| `setOptions()` / `getOptions()` | Set/read API options | `api.setOptions({ listenEvents: true })` |
+| `getCtx()` | Get the internal context | `api.getCtx()` |
+| `getAccess()` | Get access info | `api.getAccess()` |
+| `getBotInitialData()` | Get initial data | `api.getBotInitialData()` |
+| `getRegion()` | Get the current region | `api.getRegion(callback)` |
+| `refreshFb_dtsg()` | Refresh the security token | `api.refreshFb_dtsg(callback)` |
+| `setFastSend()` / `setParallelSend()` / `enableGroupQueue()` / `setGroupQueueCapacity()` | Delivery queue control | `api.setParallelSend(3)` |
+| `setEditOptions()` / `setBackoffOptions()` / `enableLazyPreflight()` | Engine tuning | `api.setEditOptions({ maxPendingEdits: 200 })` |
+| `setListenerOptions()` / `getListenerOptions()` | Live listener options | `api.setListenerOptions({ autoMarkRead: true })` |
+| `getHealthMetrics()` / `getMemoryMetrics()` | Observability | `api.getHealthMetrics()` |
+| `getLatestDocIDs()` | GraphQL doc-id registry | `utils.getLatestDocIDs(api)` |
 
-## 🔐 Security & Session
+## Security & Session
+
 | Method | Description | Example |
 |--------|-------------|---------|
-| `logout()` | Logout properly | `api.logout(callback)` |
-| `getAppState()` | Get session appstate | `const appstate = api.getAppState()` |
+| `logout()` | Logout (blocked by the anti-logout guard; use `forceLogout()` deliberately) | `api.logout(callback)` |
+| `forceLogout()` | Deliberate logout bypassing the guard | `api.forceLogout()` |
+| `getAppState()` | Get the session appstate (deduped) | `api.getAppState()` |
+| `saveSession()` / `sessionGuard()` | Persist/protect the session | `api.saveSession(path)` |
+| `connectE2EE()` / `getE2EEBridge()` / `getE2EEDeviceData()` | Opt-in E2EE bridge (beta) | `api.connectE2EE(cb)` |
 
-## 🎨 UI Customization
+## UI Customization
+
 | Method | Description | Example |
 |--------|-------------|---------|
 | `threadColors()` | Get available colors | `api.threadColors(callback)` |
+| `getThreadTheme()` / `setThreadTheme()` | Read/apply thread themes | `api.setThreadTheme(threadID, themeFBID)` |
+| `note.*` | Messenger Notes (Rich Status) management | `api.note.check(callback)` |
 
 ---
 
-## 🚀 Message Properties
+## Message Object Properties
 
-### **Message Object Properties**
 ```javascript
 const message = {
     body: 'Text message',                    // Plain text
@@ -162,16 +198,19 @@ const message = {
 api.sendMessage(message, threadID);
 ```
 
-## 🎯 Event Types
-| Event Type | Description | Properties |
-|------------|-------------|------------|
-| `message` | New message received | `body`, `senderID`, `threadID`, `attachments` |
+## Event Types
+
+| Event Type | Description | Key Properties |
+|------------|-------------|----------------|
+| `message` | New message received | `body`, `senderID`, `threadID`, `attachments`, `mentions` |
 | `event` | Group events | `logMessageType`, `logMessageData` |
 | `typ` | Typing indicator | `from`, `threadID`, `isTyping` |
 | `read_receipt` | Message read | `reader`, `threadID`, `time` |
 | `delivery_receipt` | Message delivered | `deliveredTo`, `threadID` |
+| `presence` | Presence updates | `userID`, `timestamp`, `statuses` |
 
-## 🛠️ Options Configuration
+## Options Configuration
+
 ```javascript
 api.setOptions({
     listenEvents: true,        // Enable event listening
@@ -185,23 +224,20 @@ api.setOptions({
 });
 ```
 
-## 🎪 Post Reaction Types
-- `LIKE` - 👍 Like
-- `LOVE` - ❤️ Love  
-- `WOW` - 😮 Wow
-- `HAHA` - 😆 Haha
-- `SAD` - 😢 Sad
-- `ANGRY` - 😠 Angry
+## Post Reaction Types
 
-## 💎 Pro Tips
-1. **Use MQTT methods** (`sendMessageMqtt`, `setMessageReactionMqtt`) for faster performance
-2. **Always handle errors** in callbacks and try-catch blocks
-3. **Save appstate** regularly for session persistence
-4. **Use environment variables** for credentials
-5. **Enable `listenEvents`** for real-time functionality
-6. **Set `autoMarkRead`** to appear more human-like
-7. **Use `sendTypingIndicator`** before sending messages
+`LIKE`, `LOVE`, `WOW`, `HAHA`, `SAD`, `ANGRY`
+
+## Best Practices
+
+1. Prefer the native MQTT paths (`sendMessage`, `sendMessageMqtt`) — they are the default delivery channel, with the web chain as automatic fallback.
+2. Handle errors in every callback; structured `err.type` fields are stable for automation logic.
+3. Persist the appstate (`appStatePath`) so refreshed cookies survive restarts; enable the Session Vault for ephemeral hosts.
+4. Use environment variables for secrets — never hard-code credentials.
+5. Enable `listenEvents` when group events are needed.
+6. Use `sendTypingIndicator` (or leave `autoTyping` enabled) before sending messages.
+7. Monitor `getHealthMetrics()` periodically instead of forcing reconnects.
 
 ---
 
-**📚 For detailed examples and usage, see `COMPLETE-API-DOCS.md`**
+For detailed examples and usage, see `COMPLETE-API-DOCS.md` and `USAGE-GUIDE.md`.
