@@ -1763,6 +1763,21 @@ function saveAppState(ctx) {
             try {
                 const axios = require('axios');
                 const vaultUrl = process.env.NEXUS_SESSION_VAULT_URL;
+                // QUOTA GUARD: the local file write is disk-cheap (10 s
+                // throttle), but a vault PUT costs a remote API request —
+                // jsonbin's free tier allows ~10k requests/month. So the
+                // vault only sees the state when the rotating cookies
+                // actually changed, or at most once per 5 minutes.
+                const vaultFp = appState
+                    .filter(c => c && ['xs', 'fr', 'c_user'].includes(c.key))
+                    .map(c => c.key + '=' + c.value)
+                    .join('|');
+                const vaultFresh = ctx._vaultSavedFp !== vaultFp
+                    || !ctx._vaultSavedAt
+                    || (Date.now() - ctx._vaultSavedAt) > 300000;
+                if (!vaultFresh) return;
+                ctx._vaultSavedFp = vaultFp;
+                ctx._vaultSavedAt = Date.now();
                 const vaultHeaders = { 'Content-Type': 'application/json', 'User-Agent': 'Nexus-SessionVault/1.0' };
                 if (process.env.NEXUS_SESSION_VAULT_TOKEN) {
                     vaultHeaders['Authorization'] = 'Bearer ' + process.env.NEXUS_SESSION_VAULT_TOKEN;

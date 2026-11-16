@@ -1,5 +1,38 @@
 # Changelog
 
+## [5.2.2] - 2026-11-16 - 🔐 VAULT HARDENING (QUOTA GUARD + LIVE SEED)
+
+Hardening for the Session Vault shipped in 5.2.1, driven by the live
+jsonbin setup:
+
+### Changed
+- **Vault save quota guard (`utils.js`)**: the local appstate file keeps
+  its 10-second throttle, but a vault PUT costs a remote API request —
+  jsonbin's free tier allows ~10k requests/month. The vault now only
+  receives the state when the rotating cookies (`xs`/`fr`/`c_user`)
+  actually changed, or at most once per 5 minutes; a failed PUT is
+  retried on the next qualifying save.
+- **Health server on the lock path (bot, `login.js`)**: the success path
+  binds the uptime server only after a completed login, so a failed
+  cookie login left the port unbound — Koyeb's TCP health check killed
+  the container ~60 s into the wait and the patient retry never fired
+  (the restart loop replaying dead cookies). The health server now binds
+  on the lock path too (`bindUptimeServerOnLock`), keeping the instance
+  alive so the 15-minute retry and the vault/bootstrap fingerprint
+  alternation actually get to run.
+- **Vault save on login success (bot, `login.js`)**: the state that just
+  logged in successfully is pushed to the vault immediately, so a
+  restart never has to wait for the periodic refresher (which can be
+  hours away) to learn the fresh copy.
+
+### Verified
+- 179 checks green in the bot copy (42-check contract suite now also
+  covering the quota guard, the lock-path health bind and the
+  success-path vault push; 103-check upstream-compat; 34-check
+  regression), standalone 103/103. Live jsonbin round-trip verified
+  against the exact contract: GET `{ record: { appState, savedAt } }`
+  unwrap and PUT update with `X-Master-Key`.
+
 ## [5.2.1] - 2026-11-16 - 🔐 SESSION VAULT (COOKIE-DEATH FIX)
 
 Fixes the recurring "cookie dies after every restart" loop on ephemeral
