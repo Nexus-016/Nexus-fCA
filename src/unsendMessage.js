@@ -15,26 +15,49 @@ module.exports = function (defaultFuncs, api, ctx) {
 		});
 
 		if (!callback) {
-			callback = function (err, friendList) {
+			callback = function (err) {
 				if (err) {
 					return rejectFunc(err);
 				}
-				resolveFunc(friendList);
+				resolveFunc();
 			};
 		}
 
-		// NEXUS LIGHTSPEED: the unsend task (label 33) carries the thread
-		// key alongside the message id. The bot unsends overwhelmingly its
-		// own messages, whose thread id is indexed at send time; when the
-		// id is unknown the message id itself is used as the key (same
-		// convention the delete task uses) and any uncertainty is covered
-		// by the web fallback below — an unsend is idempotent, so falling
-		// back after a possible server-side application can never corrupt
-		// the thread state.
-		const index = ctx._messageThreadIndex;
-		const threadKey = (index && index.get(String(messageID))) || String(messageID);
+		// NEXUS LIGHTSPEED: unsend = LightSpeed task label 33, queue
+		// "unsend_message", payload {message_id} — and nothing else.
+		// Verified against the genuine upstream reference (0xzer/messagix,
+		// socket/messages.go DeleteMessageTask + socket/task.go TaskLabels):
+		// the task does NOT carry a thread_key or sync_group, so it also
+		// works for messages sent in an earlier process whose thread
+		// mapping is long gone. An earlier build padded the payload with
+		// thread_key/sync_group that the genuine task does not carry —
+		// keep the reference shape exactly instead.
+		// Note: this removes the message for everyone (actor's own
+		// message); deleting only for yourself is the separate delete task
+		// (deleteMessage.js, label 146).
+		publishLsTask({
+			taskType: "unsend_message",
+			versionId: "25393437286970779",
+			tasks: [{
+				failure_count: null,
+				label: "33",
+				payload: JSON.stringify({
+					message_id: String(messageID)
+				}),
+				queue_name: "unsend_message",
+				task_id: ++ctx.wsTaskNumber
+			}]
+		})
+			.then(function () {
+				return callback();
+			})
+			.catch(function (err) {
+				log.warn("unsendMessage", "Lightspeed unsend rejected, trying web path: " +
+					(err && err.message ? err.message : (err && err.error) || err));
+				webFallback();
+			});
 
-		const webFallback = function () {
+		function webFallback() {
 			const form = {
 				message_id: messageID
 			};
@@ -57,29 +80,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 					log.error("unsendMessage", err);
 					return callback(err);
 				});
-		};
-
-		publishLsTask({
-			taskType: "unsend_message",
-			versionId: "25393437286970779",
-			tasks: [{
-				failure_count: null,
-				label: "33",
-				payload: JSON.stringify({
-					message_id: String(messageID),
-					thread_key: threadKey,
-					sync_group: 1
-				}),
-				queue_name: "unsend_message",
-				task_id: ++ctx.wsTaskNumber
-			}]
-		})
-			.then(function () {
-				return callback();
-			})
-			.catch(function () {
-				webFallback();
-			});
+		}
 
 		return returnPromise;
 	};
