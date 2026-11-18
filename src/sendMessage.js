@@ -13,6 +13,8 @@ var allowedProperties = {
 	body: true,
 	mentions: true,
 	location: true,
+	// NEXUS EXPERIMENTAL: Messenger message effects ("power up style")
+	effect: true,
 };
 
 module.exports = function (defaultFuncs, api, ctx) {
@@ -27,6 +29,27 @@ module.exports = function (defaultFuncs, api, ctx) {
 	const LS_VERSION_ID = "24804310205905615";
 	const LS_SEND_LABEL = "46";
 	const LS_READ_LABEL = "21";
+
+	// NEXUS EXPERIMENTAL: message effects ("power up style"). The values
+	// below are community-captured and are NOT documented in the genuine
+	// references (messagix/mautrix carry no such field on SendMessageTask).
+	// They are sent best-effort: the server is expected to ignore unknown
+	// payload fields, so an unrecognized value should just send the message
+	// normally without any effect, and the web fallback still covers a hard
+	// rejection. Effects apply to plain text/emoji sends only — sticker,
+	// attachment and location sends drop the effect with a warning. Live
+	// verification pending: confirm in the Messenger app that a sent
+	// message actually renders its effect.
+	const LS_EFFECTS = {
+		LOVE: 1,
+		GIFT_WRAP: 2,
+		CELEBRATION: 3,
+		FIRE: 4,
+		AVATAR_LOVE: 1000,
+		AVATAR_ANGER: 1001,
+		AVATAR_LAUGH: 1002,
+		AVATAR_CRY: 1003
+	};
 
 	function canSendViaLightspeed(msg, threadIDType) {
 		if (threadIDType === "Array") return false;
@@ -134,6 +157,17 @@ module.exports = function (defaultFuncs, api, ctx) {
 			payload0.send_type = 1;
 			payload0.text = msg.emoji;
 			payload0.hot_emoji_size = msg.emojiSize === "small" ? 1 : msg.emojiSize === "large" ? 3 : 2;
+		}
+		// NEXUS EXPERIMENTAL: power_up_style rides on plain text/emoji sends
+		// (send_type 1). Mixed sends keep the message but drop the effect.
+		if (msg.effect != null) {
+			if (msg.sticker != null || msg.attachment != null || msg.location != null) {
+				log.warn("sendMessage", "Effects apply to text messages only — dropping the effect for this send");
+			} else {
+				const effectStyle = LS_EFFECTS[String(msg.effect).toUpperCase()];
+				if (effectStyle != null) payload0.power_up_style = effectStyle;
+				else log.warn("sendMessage", "Unknown effect \"" + msg.effect + "\" — sending without an effect");
+			}
 		}
 		if (replyToMessage) {
 			payload0.reply_metadata = {
@@ -597,6 +631,12 @@ module.exports = function (defaultFuncs, api, ctx) {
 					)
 				)
 			);
+
+		// NEXUS EXPERIMENTAL: effects only ride the Lightspeed task — the
+		// legacy web endpoint has no power_up_style, so warn when a caller
+		// asks for an effect on a send that has to take the web path.
+		if (msg.effect != null && !canSendViaLightspeed(msg, threadIDType))
+			log.warn("sendMessage", "effect is only supported on the Lightspeed send path — it will be ignored on the web fallback for this send");
 
 		if (!canSendViaLightspeed(msg, threadIDType)) {
 			sendViaWebChain();

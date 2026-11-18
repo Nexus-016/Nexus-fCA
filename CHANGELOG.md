@@ -1,5 +1,33 @@
 # Changelog
 
+## [5.3.1] - 2026-11-18 - ✨ EXPERIMENTAL MESSAGE EFFECTS (power_up_style)
+
+One consciously adopted experiment, documented as such — every other
+protocol shape in this release stays genuine-reference only.
+
+### Added
+- **`sendMessage` `msg.effect` (EXPERIMENTAL)**: a plain text or emoji send
+  can carry a Messenger message effect through the LightSpeed task's
+  `power_up_style` field — `love`, `gift_wrap`, `celebration`, `fire`,
+  `avatar_love`, `avatar_anger`, `avatar_laugh`, `avatar_cry`.
+  Honesty note: the numeric mapping (LOVE:1, GIFT_WRAP:2, CELEBRATION:3,
+  FIRE:4, AVATAR_*:1000-1003) is community-captured and appears in neither
+  genuine reference — the messagix and mautrix-meta SendMessageTask
+  structs carry no such field. It is shipped as an explicitly marked
+  experiment under the graceful-degradation profile: the server is
+  expected to ignore unknown payload fields (the message then lands
+  normally without an effect), and the proven web fallback still covers a
+  hard rejection. Effects ride text/emoji sends only — sticker, attachment
+  and location sends drop the effect with a warning, and a send forced
+  onto the legacy web path logs that no effect can ride it. This
+  consciously relaxes the 5.1.0 policy line for this one field; music
+  stickers and bump remain unprovided. Live verification (an effect
+  actually rendering in the Messenger app) is pending.
+
+### New (bot)
+- **`!effect` fun command** (alias `!fx`): `!effect <name> <text>` sends
+  the text wrapped in the chosen effect; bare `!effect` lists all eight.
+
 ## [5.3.0] - 2026-11-17 - ⚡ LIGHTSPEED PARITY SPRINT II (6 NEW NATIVE OPS)
 
 Six more thread operations now run through the native LightSpeed task
