@@ -29,6 +29,7 @@ api.sendMessage({
 | `mentions` | `{tag, id, fromIndex}[]` | Mentions pointing into `body`. |
 | `location` | `{latitude, longitude, current?}` | Location share. |
 | `effect` | string | (EXPERIMENTAL) Messenger effect name — see below. |
+| `attachmentFbid` | string \| string[] | (EXPERIMENTAL) Raw attachment fbid — see below. |
 
 Plain strings are shorthand for `{ body: "..." }`. A callback is
 optional — without one, `sendMessage` returns a promise.
@@ -67,6 +68,26 @@ no such field). The library degrades gracefully in every direction:
 these four values. The `avatar_*` effects did **not** render yet: either
 their 1000-1003 values are wrong, or avatar effects additionally need
 the sender's Meta avatar configured (the test account had none).
+
+## attachmentFbid (EXPERIMENTAL)
+
+An experimental field for sharing an already-registered attachment by
+raw fbid — the community-captured music/XMA share shape (the fbid rides
+the LightSpeed task's `attachment_fbids` with `send_type` 1/TEXT, label
+46, queue = threadID). No upload happens; the fbid must come from a real
+share. Live verification pending; if this shape proves wrong, the next
+candidate is `send_type` 3 (MEDIA), the pairing the genuine references
+use for uploaded media.
+
+```js
+// capture a fbid from a real share first (see getThreadHistory)
+api.sendMessage({ attachmentFbid: "123456789" }, threadID);
+```
+
+LightSpeed-only by design: the legacy web form cannot reference a
+foreign fbid, so if MQTT is down the call errors instead of silently
+degrading, and on task rejection or ack timeout the error is surfaced
+directly (no web fallback, no duplicate plain-text send).
 
 ## Arguments
 - `message`: Message string or message object.

@@ -15,6 +15,9 @@ var allowedProperties = {
 	location: true,
 	// NEXUS EXPERIMENTAL: Messenger message effects ("power up style")
 	effect: true,
+	// NEXUS EXPERIMENTAL: raw attachment fbid (community-captured music/
+	// XMA share shape, live verification pending)
+	attachmentFbid: true,
 };
 
 module.exports = function (defaultFuncs, api, ctx) {
@@ -81,7 +84,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 		// mentions are offsets into the text — a mention without body text
 		// has no place to point at, so it stays on the web path
 		if (msg.mentions != null && !(Array.isArray(msg.mentions) && msg.mentions.length && msg.body != null && msg.mentions.some(m => m && m.id != null))) return false;
-		return msg.body != null || msg.sticker != null || msg.emoji != null || msg.attachment != null || msg.location != null;
+		return msg.body != null || msg.sticker != null || msg.emoji != null || msg.attachment != null || msg.location != null || msg.attachmentFbid != null;
 	}
 
 	// NEXUS LIGHTSPEED: mention_data shape — comma-joined ids/offsets/
@@ -167,7 +170,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 		// NEXUS EXPERIMENTAL: power_up_style rides on plain text/emoji sends
 		// (send_type 1). Mixed sends keep the message but drop the effect.
 		if (msg.effect != null) {
-			if (msg.sticker != null || msg.attachment != null || msg.location != null) {
+			if (msg.sticker != null || msg.attachment != null || msg.location != null || msg.attachmentFbid != null) {
 				log.warn("sendMessage", "Effects apply to text messages only — dropping the effect for this send");
 			} else {
 				const effectStyle = LS_EFFECTS[String(msg.effect).toUpperCase()];
@@ -198,6 +201,17 @@ module.exports = function (defaultFuncs, api, ctx) {
 			payload0.send_type = 3;
 			payload0.text = body === "" ? null : body;
 			payload0.attachment_fbids = attachmentFbids.map(String);
+		}
+
+		// NEXUS EXPERIMENTAL: raw attachment fbid (community-captured music/
+		// XMA share shape): the fbid rides attachment_fbids with send_type
+		// 1 (TEXT) — no upload, no read-task pairing. Live verification
+		// pending; if this shape proves wrong the next candidate is
+		// send_type 3 (MEDIA), the pairing the genuine references use for
+		// uploaded media.
+		if (msg.attachmentFbid != null) {
+			payload0.send_type = 1;
+			payload0.attachment_fbids = (Array.isArray(msg.attachmentFbid) ? msg.attachmentFbid : [msg.attachmentFbid]).map(String);
 		}
 
 		// The task envelope: the send task plus the read-watermark task
@@ -244,9 +258,18 @@ module.exports = function (defaultFuncs, api, ctx) {
 			callback(err, messageInfo);
 		};
 
+		// NEXUS EXPERIMENTAL: attachmentFbid sends have no web fallback —
+		// the legacy form cannot reference a foreign fbid, so surfacing the
+		// error beats sending a duplicate plain-text message.
+		const suppressWebFallback = msg.attachmentFbid != null;
+
 		const timeoutMs = Number(ctx._lsSendTimeoutMs) > 0 ? Number(ctx._lsSendTimeoutMs) : 15000;
 		const timer = setTimeout(function () {
 			log.warn("sendMessage", "Lightspeed send ack timed out, falling back to the web send path");
+			if (suppressWebFallback) {
+				finish({ error: "Lightspeed send ack timed out (attachmentFbid send — no web fallback available)." });
+				return;
+			}
 			try { webFallback(); } catch (e) { finish(e); }
 		}, timeoutMs);
 		if (typeof timer.unref === "function") timer.unref();
@@ -262,6 +285,10 @@ module.exports = function (defaultFuncs, api, ctx) {
 			callback: function (err, data) {
 				if (err) {
 					log.warn("sendMessage", "Lightspeed send rejected, falling back to the web send path");
+					if (suppressWebFallback) {
+						finish(err);
+						return;
+					}
 					try { webFallback(); } catch (e) { finish(e); }
 					return;
 				}
@@ -643,6 +670,14 @@ module.exports = function (defaultFuncs, api, ctx) {
 		// asks for an effect on a send that has to take the web path.
 		if (msg.effect != null && !canSendViaLightspeed(msg, threadIDType))
 			log.warn("sendMessage", "effect is only supported on the Lightspeed send path — it will be ignored on the web fallback for this send");
+
+		// NEXUS EXPERIMENTAL: raw attachment fbids only ride the Lightspeed
+		// task — the legacy web form cannot reference a foreign fbid, so a
+		// send that cannot take Lightspeed fails loudly instead of silently
+		// degrading to a plain text message.
+		if (msg.attachmentFbid != null && !canSendViaLightspeed(msg, threadIDType)) {
+			return callback({ error: "attachmentFbid needs the Lightspeed send path (MQTT connected) — it cannot ride the legacy web path." });
+		}
 
 		if (!canSendViaLightspeed(msg, threadIDType)) {
 			sendViaWebChain();

@@ -1,5 +1,32 @@
 # Changelog
 
+## [5.3.3] - 2026-11-18 - 🎵 EXPERIMENTAL ATTACHMENT FBID (music share test shape)
+
+A second consciously-adopted experiment, same profile as the effects
+field: a community-captured send shape, shipped best-effort and decided
+by live verification.
+
+### Added
+- **`sendMessage` `msg.attachmentFbid` (EXPERIMENTAL)**: sends an
+  already-registered attachment by raw fbid through the LightSpeed
+  task's `attachment_fbids` with `send_type` 1 (TEXT) — the
+  community-captured music/XMA share shape (label 46, queue = threadID).
+  No upload happens; the fbid must come from a real share. Lightspeed
+  only: if MQTT is down the call errors loudly, and on task rejection or
+  ack timeout the error is surfaced directly — no web fallback for fbid
+  sends (the legacy web form cannot reference a foreign fbid), so no
+  duplicate plain-text send can happen. The engine's genuine protections
+  all stay: timestamp-derived otid, BigInt epoch_id, live-verified
+  version_id, monotonic task ids, real /ls_resp ack routing. What was
+  NOT adopted from the capture: `source: 0` (a valid enum value but
+  unused by both genuine references — our live-verified source stays),
+  random task ids, the `Date.now() * 1000000` epoch (Number precision
+  loss beyond 2^53) and the stale snapshot version_id. Stickers do not
+  ride attachment_fbids — send_type 2 + sticker_id is the genuine,
+  live-proven sticker path. Missing half of the puzzle (where the music
+  fbid comes from) is a capture flow: send a real song share into a
+  thread the bot is in, then read the fbid via getThreadHistory.
+
 ## [5.3.2] - 2026-11-18 - ✅ EFFECTS LIVE-VERIFIED (music verdict)
 
 ### Verified in live chat (2026-11)
