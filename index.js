@@ -285,12 +285,20 @@ function buildAPI(globalOptions, html, jar) {
         logger("Circuit breaker active: slowing sends for flagged account", "warn");
         await new Promise(r => setTimeout(r, 30000));
       }
-      const wrappedCallback = typeof callback === 'function'
+      // NEXUS ATTACHMENT FIX: keep the promise contract intact — only pass a
+      // callback when the caller actually supplied one. The old synthetic
+      // callback made the underlying send (and the group-queue wrapper) treat
+      // the call as callback-style, so `await api.sendMessage(...)` either
+      // hung forever (its promise was never wired) or resolved before the
+      // upload finished and callers deleted their temp attachment too early
+      // (ENOENT in uploadAttachment).
+      const hasCallback = typeof callback === 'function';
+      const wrappedCallback = hasCallback
         ? function (err, res) {
             if (err) noteBreakerError(err); else breaker.fails = 0;
             try { callback(err, res); } catch (_) { }
           }
-        : function (err) { if (err) noteBreakerError(err); else breaker.fails = 0; };
+        : undefined;
       try {
         const res = await _origSend(message, threadID, wrappedCallback, replyToMessage, isGroup);
         return res;

@@ -257,6 +257,12 @@ module.exports = function (defaultFuncs, api, ctx) {
 				if (res.error) throw res;
 				return res.payload.metadata[0];
 			} catch (err) {
+				// NEXUS ATTACHMENT FIX: the temp file is gone (caller deleted
+				// it or the OS removed it) — no retry can bring it back, so
+				// fail fast instead of stalling the send chain for
+				// maxRetries × delayMs with the same ENOENT every time.
+				const msg = String(err && (err.message || err.code || err));
+				if (err && (err.code === "ENOENT" || msg.includes("ENOENT"))) throw err;
 				if (attempt === maxRetries) throw err;
 				log.warn("uploadAttachment", `Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
 				await new Promise(resolve => setTimeout(resolve, delayMs));

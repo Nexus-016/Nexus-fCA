@@ -14,6 +14,12 @@ module.exports = function (defaultFuncs, api, ctx) {
 				if (res.error) throw res;
 				return res.payload.metadata[0];
 			} catch (err) {
+				// NEXUS ATTACHMENT FIX: the temp file is gone (caller deleted
+				// it or the OS removed it) — no retry can bring it back, so
+				// fail fast instead of stalling the send chain for
+				// maxRetries × delayMs with the same ENOENT every time.
+				const msg = String(err && (err.message || err.code || err));
+				if (err && (err.code === "ENOENT" || msg.includes("ENOENT"))) throw err;
 				if (attempt === maxRetries) throw err;
 				log.warn("uploadAttachment", `Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
 				await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -256,17 +262,25 @@ module.exports = function (defaultFuncs, api, ctx) {
 		) {
 			return threadID({ error: "Pass a threadID as a second argument." });
 		}
-		if (
-			!replyToMessage &&
-			utils.getType(callback) === "String"
-		) {
-			replyToMessage = callback;
-			callback = function () { };
-		}
 
-
-		if (!callback) {
-			callback = function (err, friendList) {
+		// NEXUS ATTACHMENT FIX: preserve the promise contract for
+		// `await api.sendMessageMqtt(...)`. The upload is asynchronous, so
+		// returning undefined let callers delete their temp attachment file
+		// before the upload consumed it (ENOENT, retried pointlessly).
+		let returnPromise;
+		if (typeof callback !== "function") {
+			if (!replyToMessage && utils.getType(callback) === "String") {
+				replyToMessage = callback;
+			}
+			let resolveFunc = function () { };
+			let rejectFunc = function () { };
+			returnPromise = new Promise(function (resolve, reject) {
+				resolveFunc = resolve;
+				rejectFunc = reject;
+			});
+			callback = function (err, data) {
+				if (err) return rejectFunc(err);
+				resolveFunc(data);
 			};
 		}
 
@@ -342,5 +356,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 				});
 			});
 		});
+
+		return returnPromise;
 	};
 };

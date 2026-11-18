@@ -14,7 +14,10 @@ module.exports = function (defaultFuncs, api, ctx) {
 			rejectFunc = reject;
 		});
 
-		if (!callback) {
+		// Some callers pass a threadID as the second argument (old FCA
+		// signature). Only accept real functions so the promise path still
+		// works instead of crashing with "callback is not a function".
+		if (typeof callback !== "function") {
 			callback = function (err) {
 				if (err) {
 					return rejectFunc(err);
