@@ -204,13 +204,18 @@ module.exports = function (defaultFuncs, api, ctx) {
 		}
 
 		// NEXUS EXPERIMENTAL: raw attachment fbid (community-captured music/
-		// XMA share shape): the fbid rides attachment_fbids with send_type
-		// 1 (TEXT) — no upload, no read-task pairing. Live verification
-		// pending; if this shape proves wrong the next candidate is
-		// send_type 3 (MEDIA), the pairing the genuine references use for
-		// uploaded media.
+		// XMA share shape): the fbid rides attachment_fbids directly — no
+		// upload, no read-task pairing. LIVE RESULT (2026-11): the capture's
+		// send_type 1 (TEXT) pairing was rejected by the server (the
+		// /ls_resp ack carried no optimistic message echo), so the send now
+		// pairs the fbid with send_type 3 (MEDIA) — the pairing the genuine
+		// references always use for attachment_fbids. If MEDIA also
+		// rejects, the foreign-XMA-id re-share itself is likely not
+		// permitted and the missing half of the music flow (the app's own
+		// attachment registration) stays out of reach without a real
+		// capture of that flow.
 		if (msg.attachmentFbid != null) {
-			payload0.send_type = 1;
+			payload0.send_type = 3;
 			payload0.attachment_fbids = (Array.isArray(msg.attachmentFbid) ? msg.attachmentFbid : [msg.attachmentFbid]).map(String);
 		}
 

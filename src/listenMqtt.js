@@ -1193,7 +1193,14 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
           const taskData = ctx["tasks"].get(reqID);
           const { type: taskType, callback: taskCallback } = taskData;
           const taskRespData = getTaskResponseData(taskType, parsedPayload);
-          if (taskRespData == null) { taskCallback("error", null); } else { taskCallback(null, { type: taskType, reqID: reqID, ...taskRespData, }); }
+          if (taskRespData == null) {
+            // NEXUS DIAGNOSTIC: pass a descriptive rejection instead of the
+            // bare "error" string — the trimmed response payload lets the
+            // caller see the actual LightSpeed failure rows.
+            let preview = null;
+            try { preview = JSON.stringify(parsedPayload).slice(0, 600); } catch (_) { }
+            taskCallback({ error: "Lightspeed " + taskType + " ack contained no message echo (task likely rejected by the server)", responsePreview: preview }, null);
+          } else { taskCallback(null, { type: taskType, reqID: reqID, ...taskRespData, }); }
         }
       }
     } catch (ex) {

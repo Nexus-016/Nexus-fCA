@@ -72,12 +72,15 @@ the sender's Meta avatar configured (the test account had none).
 ## attachmentFbid (EXPERIMENTAL)
 
 An experimental field for sharing an already-registered attachment by
-raw fbid — the community-captured music/XMA share shape (the fbid rides
-the LightSpeed task's `attachment_fbids` with `send_type` 1/TEXT, label
-46, queue = threadID). No upload happens; the fbid must come from a real
-share. Live verification pending; if this shape proves wrong, the next
-candidate is `send_type` 3 (MEDIA), the pairing the genuine references
-use for uploaded media.
+raw fbid — the community-captured music/XMA share shape. No upload
+happens; the fbid must come from a real share. **Live result (2026-11):**
+the capture's original `send_type` 1 (TEXT) pairing was rejected by the
+server (the ack carried no optimistic message echo), so the fbid now
+pairs with `send_type` 3 (MEDIA) — the pairing the genuine references
+always use for `attachment_fbids`. If MEDIA also rejects, the
+foreign-XMA-id re-share itself is likely not permitted and the missing
+half of the music flow (the app's own attachment registration) stays
+out of reach without a real capture of that flow.
 
 ```js
 // capture a fbid from a real share first (see getThreadHistory)

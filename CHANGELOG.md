@@ -1,5 +1,24 @@
 # Changelog
 
+## [5.3.4] - 2026-11-18 - 🔧 ATTACHMENT FBID: MEDIA PAIRING + REAL REJECTION DETAILS
+
+### Changed
+- **attachmentFbid sends now pair the fbid with send_type 3 (MEDIA)**:
+  the live test rejected the community-captured send_type 1 (TEXT)
+  pairing — the /ls_resp ack carried no optimistic message echo, so the
+  send died with a bare "error". The genuine references always pair
+  MEDIA with attachment_fbids, so that is the second candidate. If MEDIA
+  also rejects, the foreign-XMA-id re-share itself is likely not
+  permitted and the missing half of the music flow (the app's own
+  attachment registration) stays out of reach without a real capture.
+
+### Fixed
+- **Descriptive Lightspeed ack failures**: the listener now surfaces the
+  actual rejection instead of the bare "error" string — the callback
+  error carries a trimmed JSON preview of the /ls_resp payload, so the
+  next failed experiment shows the server's own failure rows (e.g.
+  LSMarkOptimisticMessageFailed) instead of nothing.
+
 ## [5.3.3] - 2026-11-18 - 🎵 EXPERIMENTAL ATTACHMENT FBID (music share test shape)
 
 A second consciously-adopted experiment, same profile as the effects
