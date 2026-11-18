@@ -1,5 +1,41 @@
 # Changelog
 
+## [5.3.5] - 2026-11-18 - ⚰️ MUSIC FBID RE-SHARE: DEAD-END VERDICT (confirmed against mautrix)
+
+### Changed
+- **attachmentFbid re-scoped to numeric fbids only.** The genuine
+  reference settles the question completely: mautrix/meta's
+  `SendMessageTask` types `attachment_fbids` as `[]int64` (numeric
+  only), and its only consumer use pairs `send_type` 3 (MEDIA) with the
+  fbid of media the sender uploaded itself
+  (`msgconv/from-matrix.go`: `ReuploadFileToMeta` →
+  `SendType MEDIA` → `[]int64{attachmentID}`).
+- **Music/XMA re-share is a dead end:** the community-captured music id
+  (`ee.mid.$...`) is an XMA cross-reference string, not a fbid — both
+  live pairings (TEXT, then MEDIA) failed with the same empty-table ack
+  `{"name":null,"step":[1]}` because the server's table decode cannot
+  read a non-numeric row (StepType 1 = BLOCK: the response carried a
+  program with zero data rows — no echo, no failure rows). The music
+  bubble's own numeric fbid never appears in thread history (only the
+  XMA `legacy_attachment_id` string), so the missing half of the music
+  flow (the app's own attachment registration) stays out of reach
+  without a real capture of that flow. The field survives for the one
+  remaining live question: re-sharing a NUMERIC fbid captured from a
+  real file attachment (`MessageFile` → `message_file_fbid` via
+  getThreadHistory).
+- Documented-but-not-shipped genuine observations: `ForwardedMsgId`
+  (string, pairs with SendType FORWARD=5 per the struct comment) and
+  `EXTERNAL_MEDIA=7` + `Url` + `AttributionAppId` (external media URL,
+  giphy-style) both exist in the genuine task struct but have zero
+  consumer use in the reference — no verified request shape, so nothing
+  is sent on them.
+
+### Docs
+- docs/sendMessage.md: attachmentFbid section rewritten with the verdict
+  and the genuine upload-then-MEDIA flow; the one path that works today
+  for playable audio (real upload → Messenger renders an audio
+  attachment) called out.
+
 ## [5.3.4] - 2026-11-18 - 🔧 ATTACHMENT FBID: MEDIA PAIRING + REAL REJECTION DETAILS
 
 ### Changed

@@ -15,8 +15,8 @@ var allowedProperties = {
 	location: true,
 	// NEXUS EXPERIMENTAL: Messenger message effects ("power up style")
 	effect: true,
-	// NEXUS EXPERIMENTAL: raw attachment fbid (community-captured music/
-	// XMA share shape, live verification pending)
+	// NEXUS EXPERIMENTAL: raw attachment fbid re-share (numeric upload
+	// fbids only — the music/XMA string id shape was a live dead-end)
 	attachmentFbid: true,
 };
 
@@ -203,17 +203,22 @@ module.exports = function (defaultFuncs, api, ctx) {
 			payload0.attachment_fbids = attachmentFbids.map(String);
 		}
 
-		// NEXUS EXPERIMENTAL: raw attachment fbid (community-captured music/
-		// XMA share shape): the fbid rides attachment_fbids directly — no
-		// upload, no read-task pairing. LIVE RESULT (2026-11): the capture's
-		// send_type 1 (TEXT) pairing was rejected by the server (the
-		// /ls_resp ack carried no optimistic message echo), so the send now
-		// pairs the fbid with send_type 3 (MEDIA) — the pairing the genuine
-		// references always use for attachment_fbids. If MEDIA also
-		// rejects, the foreign-XMA-id re-share itself is likely not
-		// permitted and the missing half of the music flow (the app's own
-		// attachment registration) stays out of reach without a real
-		// capture of that flow.
+		// NEXUS EXPERIMENTAL: raw attachment fbid re-share. VERDICT
+		// (2026-11, confirmed against mautrix/meta): the genuine
+		// SendMessageTask types attachment_fbids as []int64 and the only
+		// genuine use pairs MEDIA (3) with the numeric fbid of media the
+		// sender uploaded itself (mautrix msgconv/from-matrix.go:
+		// ReuploadFileToMeta -> SendType MEDIA -> []int64{attachmentID}).
+		// The community-captured music/XMA string id (ee.mid.$...) is not
+		// a fbid at all — both live pairings (TEXT, MEDIA) failed with the
+		// same empty-table ack {"name":null,"step":[1]} because the
+		// server's table decode cannot read a non-numeric row. The music
+		// bubble's own fbid never appears in thread history (only the XMA
+		// legacy_attachment_id string), so the app's registration flow
+		// stays out of reach without a real capture. The field stays
+		// scoped to NUMERIC fbids (e.g. a MessageFile's message_file_fbid
+		// captured from getThreadHistory) — re-sharing foreign media that
+		// way is the one remaining live question for this path.
 		if (msg.attachmentFbid != null) {
 			payload0.send_type = 3;
 			payload0.attachment_fbids = (Array.isArray(msg.attachmentFbid) ? msg.attachmentFbid : [msg.attachmentFbid]).map(String);
@@ -676,10 +681,10 @@ module.exports = function (defaultFuncs, api, ctx) {
 		if (msg.effect != null && !canSendViaLightspeed(msg, threadIDType))
 			log.warn("sendMessage", "effect is only supported on the Lightspeed send path — it will be ignored on the web fallback for this send");
 
-		// NEXUS EXPERIMENTAL: raw attachment fbids only ride the Lightspeed
-		// task — the legacy web form cannot reference a foreign fbid, so a
-		// send that cannot take Lightspeed fails loudly instead of silently
-		// degrading to a plain text message.
+		// NEXUS EXPERIMENTAL: attachmentFbid re-shares only ride the
+		// Lightspeed task — the legacy web form has no fbid reference
+		// field at all, so a send that cannot take Lightspeed fails
+		// loudly instead of silently degrading to a plain text message.
 		if (msg.attachmentFbid != null && !canSendViaLightspeed(msg, threadIDType)) {
 			return callback({ error: "attachmentFbid needs the Lightspeed send path (MQTT connected) — it cannot ride the legacy web path." });
 		}

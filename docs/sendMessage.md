@@ -29,7 +29,7 @@ api.sendMessage({
 | `mentions` | `{tag, id, fromIndex}[]` | Mentions pointing into `body`. |
 | `location` | `{latitude, longitude, current?}` | Location share. |
 | `effect` | string | (EXPERIMENTAL) Messenger effect name — see below. |
-| `attachmentFbid` | string \| string[] | (EXPERIMENTAL) Raw attachment fbid — see below. |
+| `attachmentFbid` | string \| string[] | (EXPERIMENTAL) Raw numeric attachment fbid re-share — see below. |
 
 Plain strings are shorthand for `{ body: "..." }`. A callback is
 optional — without one, `sendMessage` returns a promise.
@@ -69,21 +69,30 @@ these four values. The `avatar_*` effects did **not** render yet: either
 their 1000-1003 values are wrong, or avatar effects additionally need
 the sender's Meta avatar configured (the test account had none).
 
-## attachmentFbid (EXPERIMENTAL)
+## attachmentFbid (EXPERIMENTAL — numeric fbids only)
 
-An experimental field for sharing an already-registered attachment by
-raw fbid — the community-captured music/XMA share shape. No upload
-happens; the fbid must come from a real share. **Live result (2026-11):**
-the capture's original `send_type` 1 (TEXT) pairing was rejected by the
-server (the ack carried no optimistic message echo), so the fbid now
-pairs with `send_type` 3 (MEDIA) — the pairing the genuine references
-always use for `attachment_fbids`. If MEDIA also rejects, the
-foreign-XMA-id re-share itself is likely not permitted and the missing
-half of the music flow (the app's own attachment registration) stays
-out of reach without a real capture of that flow.
+An experimental field for re-sharing an already-uploaded attachment by
+raw numeric fbid. **Final verdict (2026-11, confirmed against
+mautrix/meta):** the genuine `SendMessageTask` types `attachment_fbids`
+as `[]int64` — numeric fbids only — and the only genuine consumer use
+pairs `send_type` 3 (MEDIA) with the fbid of media the sender uploaded
+itself (`ReuploadFileToMeta` → `SendType MEDIA` →
+`[]int64{attachmentID}`).
+
+**Music/XMA re-share is a dead end:** the community-captured music id
+(`ee.mid.$...`) is an XMA cross-reference string, not a fbid at all —
+both live pairings (TEXT, then MEDIA) failed with the same empty-table
+ack `{"name":null,"step":[1]}` because the server's table decode cannot
+read a non-numeric row. The music bubble's own numeric fbid never
+appears in thread history (only the XMA `legacy_attachment_id` string),
+so the app's own registration flow stays out of reach without a real
+capture of that flow. Sending real audio instead — upload the file and
+let Messenger render it as a playable audio attachment — is the genuine
+path that works today.
 
 ```js
-// capture a fbid from a real share first (see getThreadHistory)
+// numeric fbid only — e.g. a MessageFile's message_file_fbid captured
+// from getThreadHistory attachments (ID field)
 api.sendMessage({ attachmentFbid: "123456789" }, threadID);
 ```
 
