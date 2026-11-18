@@ -28,6 +28,15 @@ protocol shape in this release stays genuine-reference only.
 - **`!effect` fun command** (alias `!fx`): `!effect <name> <text>` sends
   the text wrapped in the chosen effect; bare `!effect` lists all eight.
 
+### Docs
+- **`docs/sendMessage.md`**: full message-object field table plus the
+  experimental effects section (accepted names, graceful-degradation
+  behavior, live-verification status).
+- **`index.d.ts`**: `MessageObject` now types `effect?: string` (the
+  `MessageOptions` wrapper interface is intentionally left untouched —
+  its `replyTo`/`isTyping` fields are wrapper-level and would not reach
+  the core engine untransformed).
+
 ## [5.3.0] - 2026-11-17 - ⚡ LIGHTSPEED PARITY SPRINT II (6 NEW NATIVE OPS)
 
 Six more thread operations now run through the native LightSpeed task

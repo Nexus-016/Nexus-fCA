@@ -328,7 +328,12 @@ declare module 'nexus-fca' {
             latitude: number,
             longitude: number,
             current?: boolean
-        }
+        },
+        // EXPERIMENTAL: Messenger message effect name — love, gift_wrap,
+        // celebration, fire, avatar_love, avatar_anger, avatar_laugh,
+        // avatar_cry. Rides the LightSpeed task's power_up_style field;
+        // unverified mappings send normally without the visible effect.
+        effect?: string
     }
 
     function sendMessage(
