@@ -1,5 +1,30 @@
 # Changelog
 
+## [5.3.2] - 2026-11-18 - ✅ EFFECTS LIVE-VERIFIED (music verdict)
+
+### Verified in live chat (2026-11)
+- **LOVE, GIFT_WRAP, CELEBRATION, FIRE render their Messenger effects** —
+  the community-captured `power_up_style` mapping (1, 2, 3, 4) is
+  genuine. The experiment is no longer speculative for these four
+  values.
+- **AVATAR_LOVE/ANGER/LAUGH/CRY (1000-1003) do not render yet.** Either
+  the values are wrong or avatar effects additionally need the sender's
+  Meta avatar configured (the test account has none). They stay in the
+  map marked unverified — the degrade-to-normal-send behavior covers
+  them either way.
+
+### Music share — investigated, still unprovided
+- Receive side: a music bubble arrives as an XMA attachment
+  (AttachmentType 7) carrying `PlayableAudioURL`/`XmaDataclass` style
+  metadata (both references' attachment tables agree).
+- Send side: no genuine implementation exists in any public reference —
+  the messagix and mautrix-meta SendMessageTask structs carry no music,
+  xma, shareable, sound or audio field (grep across both projects' full
+  socket packages and global code search: zero hits). Shipping a guessed
+  shape stays against this project's policy. A Spotify/YouTube/Apple
+  Music link sent as plain text still produces Messenger's automatic
+  link-preview card today.
+
 ## [5.3.1] - 2026-11-18 - ✨ EXPERIMENTAL MESSAGE EFFECTS (power_up_style)
 
 One consciously adopted experiment, documented as such — every other

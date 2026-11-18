@@ -32,14 +32,20 @@ module.exports = function (defaultFuncs, api, ctx) {
 
 	// NEXUS EXPERIMENTAL: message effects ("power up style"). The values
 	// below are community-captured and are NOT documented in the genuine
-	// references (messagix/mautrix carry no such field on SendMessageTask).
-	// They are sent best-effort: the server is expected to ignore unknown
-	// payload fields, so an unrecognized value should just send the message
-	// normally without any effect, and the web fallback still covers a hard
-	// rejection. Effects apply to plain text/emoji sends only — sticker,
-	// attachment and location sends drop the effect with a warning. Live
-	// verification pending: confirm in the Messenger app that a sent
-	// message actually renders its effect.
+	// references (messagix/mautrix carry no such field on SendMessageTask;
+	// no public code anywhere sends this field). They are sent best-effort:
+	// the server is expected to ignore unknown payload fields, so an
+	// unrecognized value should just send the message normally without any
+	// effect, and the web fallback still covers a hard rejection. Effects
+	// apply to plain text/emoji sends only — sticker, attachment and
+	// location sends drop the effect with a warning.
+	// LIVE VERIFICATION (2026-11): LOVE, GIFT_WRAP, CELEBRATION and FIRE
+	// render their Messenger effects — the community-captured mapping is
+	// genuine for these four values. AVATAR_LOVE/ANGER/LAUGH/CRY did not
+	// render: either the 1000-1003 values are wrong or avatar effects
+	// additionally need the sender's Meta avatar configured. They stay in
+	// the map marked unverified — the degrade-to-normal-send behavior
+	// covers them either way.
 	const LS_EFFECTS = {
 		LOVE: 1,
 		GIFT_WRAP: 2,

@@ -62,8 +62,11 @@ no such field). The library degrades gracefully in every direction:
   warning — effects only ride text/emoji sends.
 - Unknown effect names send normally with a warning instead of failing.
 
-Live rendering (the effect actually animating in the Messenger app) is
-pending verification; if the mapping turns out wrong, no harm occurs.
+**Live verification (2026-11):** `love`, `gift_wrap`, `celebration` and
+`fire` render their Messenger effects — the mapping is genuine for
+these four values. The `avatar_*` effects did **not** render yet: either
+their 1000-1003 values are wrong, or avatar effects additionally need
+the sender's Meta avatar configured (the test account had none).
 
 ## Arguments
 - `message`: Message string or message object.
