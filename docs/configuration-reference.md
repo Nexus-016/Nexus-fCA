@@ -45,21 +45,66 @@ Notes:
 ---
 ## 2) Config file: fca-config.json
 
-Auto-created in project root on first run and merged with defaults. Good for project-wide non-secret settings.
+Auto-created in project root on first run as the **full template** (every
+option, with `null` meaning "inherit the preset"). One file now controls the
+whole engine: presets tune the safety/speed trade-off, and any individual
+knob can be overridden by hand. Restart after editing.
 
-Example keys (merge-safe):
+Presets (`"preset": "..."`):
+
+| Preset    | Behaviour                                                        |
+|-----------|------------------------------------------------------------------|
+| `safety`  | Default. Conservative pacing, 1.2–2.5 s adaptive send delay, all keep-alive checks on. |
+| `ultra`   | Maximum protection. 2.5–5 s delay, ultra-low-ban mode, tighter guard spacing. |
+| `nexflash`| Safe keep-alive features stay on (headers, UA continuity, login validation, auto-refresh), but sends are near-instant (0–120 ms) and no extra heartbeat/breath/recycle traffic. |
+| `none`    | No safety shaping at all: no delays, no safe headers, no timers, no light poke. |
+
+Template shape (abridged; the file on disk lists everything):
 
 ```json
 {
-  "autoUpdate": true,
-  "mqtt": { "enabled": true, "reconnectInterval": 3600 },
-  "logLevel": "warn",
-  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...",
-  "proxy": "http://user:pass@host:port"
+  "preset": "safety",
+  "autoUpdate": false,
+  "autoLogin": false,
+  "credentials": { "email": "", "password": "", "twofactor": "" },
+  "options": {
+    "online": true, "selfListen": false, "listenEvents": false,
+    "listenTyping": false, "updatePresence": false, "forceLogin": false,
+    "autoMarkDelivery": true, "autoMarkRead": false, "autoReconnect": true,
+    "emitReady": false, "logLevel": "info", "pauseLog": false, "logRecordSize": 100
+  },
+  "network": {
+    "proxy": "", "userAgent": "", "acceptLanguage": "en-US,en;q=0.9",
+    "randomUserAgent": false, "disablePreflight": false
+  },
+  "mqtt": { "enabled": true, "reconnectInterval": 3600, "lsSendTimeoutMs": 15000 },
+  "safety": {
+    "enabled": null,
+    "sendDelay": { "min": null, "max": null },
+    "riskThrottle": null, "humanDelays": null, "safeHeaders": null,
+    "uaContinuity": null, "loginValidation": null, "autoRefresh": null,
+    "regionBypass": null, "ultraLowBanMode": null, "heartbeat": null,
+    "sessionBreath": null, "periodicRecycle": null,
+    "lightPokeIntervalMs": null, "adaptivePacingMs": null, "minActionSpacingMs": null
+  },
+  "attachments": { "uploadField": "farr", "uploadRetries": 3, "uploadRetryDelayMs": 2000 },
+  "health": { "enabled": false, "port": 3001 },
+  "sessionVault": { "url": "", "token": "", "method": "", "prefer": "vault" }
 }
 ```
 
-For secrets and per-deploy toggles, prefer environment variables.
+Notes:
+- A `null` value in `safety` inherits the selected preset. Any concrete value
+  overrides just that knob (e.g. keep `ultra` but lower `sendDelay.max`).
+- `safety.enabled: false` behaves like the `none` preset.
+- `preset: "nexflash"` is the "safe but fast" choice: it keeps the protections
+  that prevent cookie death, and drops only artificial delays and extra
+  background traffic.
+- Legacy minimal configs (`autoUpdate` + `mqtt` only) keep working — they get
+  the `safety` preset defaults for everything else.
+- `sessionVault.url/token/prefer` are bridged to the `NEXUS_SESSION_VAULT_*`
+  envs, but real environment variables always win.
+- For secrets and per-deploy toggles, prefer environment variables.
 
 ---
 ## 3) Environment variables
@@ -96,7 +141,17 @@ Environment variables are the primary way to configure behavior in production. T
 - `NEXUS_FCA_ALLOW_LIST` – Comma-separated userIDs allowed
 - `NEXUS_FCA_BLOCK_LIST` – Comma-separated userIDs blocked
 
-### 3.6 Example-only envs (for quick scripts)
+### 3.6 Session vault (ephemeral PaaS cookie persistence)
+- `NEXUS_SESSION_VAULT_URL` – HTTP endpoint holding the freshest session
+- `NEXUS_SESSION_VAULT_TOKEN` – Bearer token / jsonbin `X-Master-Key`
+- `NEXUS_SESSION_VAULT_METHOD` – `PUT` or `POST` (auto-detected by default)
+- `NEXUS_SESSION_VAULT_PREFER=env` – Skip the vault restore and always use
+  the `APPSTATE_JSON` / `appstate.json` bootstrap copy (escape hatch)
+- Rejected sessions are remembered across restarts in
+  `.nexus-vault-failure.json` (SHA-256 fingerprint only, never cookies), so a
+  restart does not replay the same dead copy.
+
+### 3.7 Example-only envs (for quick scripts)
 Used in example snippets and README demos; not used by the core library itself:
 - `FB_EMAIL` – Facebook username/email
 - `FB_PASS` / `FB_PASSWORD` – Facebook password

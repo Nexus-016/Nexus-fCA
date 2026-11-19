@@ -2,6 +2,7 @@
 var url = require("url");
 const log = require("npmlog");
 const stream = require("stream");
+const path = require("path");
 const querystring = require("querystring");
 const got = require("got");
 const { CookieJar } = require("tough-cookie");
@@ -395,6 +396,127 @@ function isReplayableFormValue(value) {
     );
 }
 
+// ——————————————— Mercury media upload helpers ———————————————
+// Genuine clients upload the file in a multipart field named "farr"
+// (reference: mautrix/meta httpclient/mercury.go and 0xzer/messagix
+// mercury.go both set `Content-Disposition: form-data; name="farr";
+// filename="..."`), to the `media_upload` endpoint that resolves to
+// `<base_url>/ajax/mercury/upload.php` (pkg/messagix/endpoints/facebook.go).
+// `voice_clip` is only sent for voice clips, never for images/video.
+const MIME_BY_EXT = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+    ".wav": "audio/wav",
+    ".pdf": "application/pdf"
+};
+
+function attachmentUploadMeta(attachment, options = {}) {
+    const filePath = (attachment && typeof attachment === "object" && typeof attachment.path === "string")
+        ? attachment.path
+        : null;
+    const filename = options.filename || (filePath ? path.basename(filePath) : `attachment_${Date.now()}`);
+    const ext = path.extname(filename).toLowerCase();
+    return {
+        filename: filename,
+        contentType: options.contentType || MIME_BY_EXT[ext] || "application/octet-stream"
+    };
+}
+
+// Build the multipart fields expected by the current Mercury upload endpoint.
+function buildUploadForm(attachment, options = {}) {
+    const meta = attachmentUploadMeta(attachment, options);
+    const cfg = (global.fca && global.fca.config && global.fca.config.attachments) || {};
+    // Genuine field is "farr"; overridable for experiments only.
+    const field = options.field || cfg.uploadField || "farr";
+    const form = {};
+    form[field] = { __formDataOptions: true, value: attachment, options: meta };
+    if (options.isVoiceClip) {
+        form.voice_clip = "true";
+        if (options.waveformData) {
+            try { form.voice_clip_waveform_data = JSON.stringify(options.waveformData); } catch (_) { }
+        }
+    }
+    return form;
+}
+
+// `attachments` group of fca-config.json: retry count + delay.
+function uploadRetryPolicy() {
+    const cfg = (global.fca && global.fca.config && global.fca.config.attachments) || {};
+    const retries = Number(cfg.uploadRetries);
+    const delay = Number(cfg.uploadRetryDelayMs);
+    return {
+        maxRetries: Number.isFinite(retries) && retries > 0 ? Math.floor(retries) : 3,
+        delayMs: Number.isFinite(delay) && delay >= 0 ? Math.floor(delay) : 2000
+    };
+}
+
+// A retry must not re-upload an already-consumed stream: reopen the file
+// from its path so each attempt carries the full payload.
+function reopenAttachment(attachment) {
+    try {
+        if (attachment && typeof attachment === "object" && typeof attachment.path === "string") {
+            return require("fs").createReadStream(attachment.path);
+        }
+    } catch (_) { }
+    return attachment;
+}
+
+// HTTP status carried by a parseAndCheckLogin error / got error.
+function uploadErrorStatus(err) {
+    if (!err || typeof err !== "object") return null;
+    const candidates = [
+        err.statusCode,
+        err.status,
+        err.response && err.response.statusCode,
+        err.response && err.response.status,
+        err.cause && err.cause.statusCode
+    ];
+    for (const candidate of candidates) {
+        const status = Number(candidate);
+        if (Number.isFinite(status) && status >= 100 && status <= 599) return status;
+    }
+    return null;
+}
+
+// 4xx upload rejections are permanent: the body/endpoint/attachment shape
+// is wrong, so retrying only burns time and spams Facebook. 408 (timeout)
+// and 429 (rate limit) stay retryable, as do transport errors.
+function isPermanentUploadError(err) {
+    const status = uploadErrorStatus(err);
+    if (status && status >= 400 && status < 500 && status !== 408 && status !== 429) return true;
+    const permanentPattern = /^(ENOENT|EACCES|EPERM|EISDIR|ENAMETOOLONG|EMFILE)\b/;
+    const code = String((err && err.code) || "");
+    const msg = String((err && err.message) || (err && err.error) || err || "");
+    return permanentPattern.test(code) || permanentPattern.test(msg);
+}
+
+// Headers a genuine Mercury upload sends (messagix/meta mercury.go).
+function uploadRequestOptions() {
+    return {
+        headers: {
+            "Accept": "*/*",
+            "Origin": "https://www.facebook.com",
+            "Referer": "https://www.facebook.com/messages/",
+            "Priority": "u=1, i",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin"
+        }
+    };
+}
+
 function isRetryableTransportError(err) {
     const code = String((err && err.code) || "");
     const message = String((err && err.message) || "");
@@ -441,7 +563,7 @@ async function postFormData(url, jar, form, qs, options, ctx) {
 
     const send = function (timeout) {
         const body = buildBody();
-        const headers = getHeaders(url, options, ctx);
+        const headers = getHeaders(url, options, ctx, options && options.headers);
         Object.assign(headers, body.getHeaders());
 
         const op = {
@@ -1592,7 +1714,7 @@ function makeDefaults(html, userID, ctx) {
     function getWithDefaults(url, jar, qs, ctxx) {
         return get(url, jar, mergeWithDefaults(qs), ctx.globalOptions, ctxx || ctx);
     }
-    function postFormDataWithDefault(url, jar, form, qs, ctxx) {
+    function postFormDataWithDefault(url, jar, form, qs, ctxx, customOptions) {
         // A form factory must stay a factory so retries can rebuild the
         // multipart body instead of reusing a consumed stream.
         const formWithDefaults =
@@ -1602,7 +1724,12 @@ function makeDefaults(html, userID, ctx) {
                       return isFormData(built) ? built : mergeWithDefaults(built);
                   }
                 : mergeWithDefaults(form);
-        return postFormData(url, jar, formWithDefaults, mergeWithDefaults(qs), ctx.globalOptions, ctxx || ctx);
+        // Per-call options (e.g. upload request headers) merge over the
+        // session-wide options for this request only.
+        const options = customOptions
+            ? Object.assign({}, ctx.globalOptions, customOptions)
+            : ctx.globalOptions;
+        return postFormData(url, jar, formWithDefaults, mergeWithDefaults(qs), options, ctxx || ctx);
     }
     return {
         get: getWithDefaults,
@@ -1703,11 +1830,24 @@ function parseAndCheckLogin(ctx, defaultFuncs, retryCount = 0, sourceCall) {
                     .then(parseAndCheckLogin(ctx, defaultFuncs, retryCount, sourceCall));
             }
             if (data.statusCode !== 200) {
+                // 4xx on a media endpoint is an upload rejection (wrong
+                // multipart shape/endpoint or an edge-server refusal), NOT
+                // proof of a dead cookie. Surface it as its own type so the
+                // caller/retry layer can fail fast and the login lock guard
+                // does not misread it as a cookie death.
+                const isUploadEndpoint = /\/mercury\/upload\.php|\/ufi\/upload|\/attachments\//i.test(String(requestUrl));
+                const is4xx = data.statusCode >= 400 && data.statusCode < 500;
+                const rejected = isUploadEndpoint && is4xx;
                 throw {
-                    message: `parseAndCheckLogin got status code: ${data.statusCode}.`,
+                    message: rejected
+                        ? `Facebook rejected the media upload (HTTP ${data.statusCode}) — attachment shape or endpoint refused; this is not a cookie-expiry signal.`
+                        : `parseAndCheckLogin got status code: ${data.statusCode}.`,
                     statusCode: data.statusCode,
                     res: data.body,
-                    error: `parseAndCheckLogin got status code: ${data.statusCode}.`,
+                    error: rejected
+                        ? "upload_rejected"
+                        : `parseAndCheckLogin got status code: ${data.statusCode}.`,
+                    type: rejected ? "upload_rejected" : undefined,
                     sourceCall
                 };
             }
@@ -2498,6 +2638,12 @@ module.exports = {
     get2: get2,
     post: post,
     postFormData: postFormData,
+    buildUploadForm,
+    uploadRetryPolicy,
+    reopenAttachment,
+    uploadErrorStatus,
+    isPermanentUploadError,
+    uploadRequestOptions,
     generateThreadingID: generateThreadingID,
     generateOfflineThreadingID: generateOfflineThreadingID,
     getGUID: getGUID,

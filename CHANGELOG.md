@@ -1,5 +1,46 @@
 # Changelog
 
+## [5.4.0] - 2026-11-19 - FULL CONFIG PRESETS, SESSION-VAULT RECOVERY, GENUINE UPLOAD SHAPE
+
+### Added
+- **Full `fca-config.json` template (auto-created on first run):** covers
+  `options`, `network`, `mqtt`, `safety`, `attachments`, `health`,
+  `autoLogin` credentials and `sessionVault`. `preset` selects
+  `safety | ultra | nexflash | none`; `null` inherits the preset and any
+  concrete value overrides it. Legacy minimal configs keep working.
+- **NexFlash preset:** safe keep-alive features stay on (safe headers, UA
+  continuity, login validation, auto-refresh); sends are near-instant
+  (0-120 ms) and heartbeat/session-breath/periodic-recycle traffic is off.
+- **Safety knobs are now fully wired:** send-delay window, risk throttle,
+  human delays, safe headers, UA continuity, heartbeat, session breath,
+  periodic recycle, light-poke interval, adaptive pacing window and action
+  spacing.
+- **Session vault failure memory:** a rejected session fingerprint is
+  SHA-256-hashed and persisted to `.nexus-vault-failure.json`, so a restart
+  does not replay the same dead copy. The restore path also live-probes the
+  vault copy and prefers a live `APPSTATE_JSON` bootstrap; a rejected vault
+  session triggers one immediate same-run fallback to the bootstrap copy.
+- **Upload helpers in `utils`:** `buildUploadForm`, `uploadRetryPolicy`,
+  `reopenAttachment`, `uploadErrorStatus`, `isPermanentUploadError`,
+  `uploadRequestOptions`.
+
+### Fixed
+- **Media upload 400:** the Mercury upload now uses the genuine endpoint
+  `https://www.facebook.com/ajax/mercury/upload.php`, the genuine `farr`
+  multipart field with filename + content type (confirmed in
+  mautrix/meta and 0xzer/messagix), cors fetch headers, and no bogus
+  `voice_clip` flag on images/video.
+- **4xx uploads fail fast** instead of retrying 3x every 2 s; 408/429/5xx
+  and transport errors still retry, and each retry reopens the file so a
+  consumed stream never uploads an empty body.
+- **`parseAndCheckLogin` classifies media 4xx as `upload_rejected`** instead
+  of a generic cookie-death signal, so the login lock guard is not misled.
+
+### Docs
+- `docs/configuration-reference.md` + `docs/deployment-config.md`: preset
+  table, full template shape, vault envs (`NEXUS_SESSION_VAULT_PREFER=env`)
+  and upload/cookie-death troubleshooting.
+
 ## [5.3.5] - 2026-11-18 - ⚰️ MUSIC FBID RE-SHARE: DEAD-END VERDICT (confirmed against mautrix)
 
 ### Changed

@@ -24,25 +24,35 @@ var allowedProperties = {
 };
 
 module.exports = function (defaultFuncs, api, ctx) {
+  // Genuine Mercury uploads carry the file in the "farr" multipart field
+  // (reference: mautrix/meta + 0xzer/messagix).
+  async function retryUpload(attachment) {
+    const { maxRetries, delayMs } = utils.uploadRetryPolicy();
+    let current = attachment;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const form = utils.buildUploadForm(current);
+        const res = await defaultFuncs
+          .postFormData("https://www.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {}, {}, utils.uploadRequestOptions())
+          .then(utils.parseAndCheckLogin(ctx, defaultFuncs));
+        if (res.error) throw res;
+        return res.payload.metadata[0];
+      } catch (err) {
+        if (utils.isPermanentUploadError(err) || attempt === maxRetries) throw err;
+        log.warn("uploadAttachment", `Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        current = utils.reopenAttachment(attachment);
+      }
+    }
+  }
+
   function uploadAttachment(attachments, callback) {
     var uploads = [];
 
     for (var i = 0; i < attachments.length; i++) {
       if (!utils.isReadableStream(attachments[i])) throw { error: "Attachment should be a readable stream and not " + utils.getType(attachments[i]) + "." };
-      var form = {
-        upload_1024: attachments[i],
-        voice_clip: "true"
-      };
 
-      uploads.push(
-        defaultFuncs
-          .postFormData("https://upload.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {}, {})
-          .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
-          .then(function (resData) {
-            if (resData.error) throw resData;
-            return resData.payload.metadata[0];
-          })
-      );
+      uploads.push(retryUpload(attachments[i]));
     }
 
     bluebird

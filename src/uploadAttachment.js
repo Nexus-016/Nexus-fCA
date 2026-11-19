@@ -2,40 +2,39 @@ const utils = require("../utils");
 const log = require("npmlog");
 
 module.exports = function (defaultFuncs, api, ctx) {
-	// Helper function to retry upload with delay
-	// Permanent local errors (missing/inaccessible file) are NOT retried:
-	// the attachment stream's underlying file is gone, so every retry
-	// would repeat the same failure and spam the console. Network/transient
-	// errors still retry.
-	const PERMANENT_UPLOAD_PATTERN = /^(ENOENT|EACCES|EPERM|EISDIR|ENAMETOOLONG|EMFILE)\b/;
-	function isPermanentUploadError(err) {
-		const code = (err && err.code) || "";
-		const msg = String((err && err.message) || (err && err.error) || err || "");
-		return PERMANENT_UPLOAD_PATTERN.test(String(code)) || PERMANENT_UPLOAD_PATTERN.test(msg);
-	}
-
-	async function retryUpload(form, maxRetries = 3, delayMs = 2000) {
+	// Helper function to retry upload with delay.
+	// Genuine Mercury uploads carry the file in the "farr" multipart field
+	// (reference: mautrix/meta + 0xzer/messagix) to
+	// <base_url>/ajax/mercury/upload.php, with cors fetch headers.
+	// Permanent rejections (missing file, HTTP 4xx) are NOT retried.
+	async function retryUpload(attachment, uploadOptions = {}) {
+		const { maxRetries, delayMs } = utils.uploadRetryPolicy();
+		let current = attachment;
 		for (let attempt = 1; attempt <= maxRetries; attempt++) {
 			try {
+				const form = utils.buildUploadForm(current, uploadOptions);
 				const res = await defaultFuncs
-					.postFormData("https://upload.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {})
+					.postFormData("https://www.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {}, {}, utils.uploadRequestOptions())
 					.then(utils.parseAndCheckLogin(ctx, defaultFuncs));
-				
+
 				if (res.error) throw res;
 				return res.payload.metadata[0];
 			} catch (err) {
-				if (attempt === maxRetries || isPermanentUploadError(err)) {
+				if (attempt === maxRetries || utils.isPermanentUploadError(err)) {
 					// Rewrite fs ENOENT noise into a single actionable line —
 					// the bot deleted its tmp attachment file before the
 					// upload consumed the stream.
-					if (isPermanentUploadError(err)) {
-						const path = (String(err && err.message || "").match(/stat '([^']+)'/) || [])[1];
-						err.message = "Attachment file not found" + (path ? `: ${path}` : "") + " — the file must exist until the upload completes (keep tmp attachment files alive while a send is in flight)";
+					const code = String((err && err.code) || "");
+					const msg = String((err && err.message) || (err && err.error) || "");
+					if (/^(ENOENT|EACCES|EPERM|EISDIR|ENAMETOOLONG|EMFILE)\b/.test(code) || /^(ENOENT|EACCES|EPERM|EISDIR|ENAMETOOLONG|EMFILE)\b/.test(msg)) {
+						const filePath = (msg.match(/stat '([^']+)'/) || [])[1];
+						err.message = "Attachment file not found" + (filePath ? `: ${filePath}` : "") + " — the file must exist until the upload completes (keep tmp attachment files alive while a send is in flight)";
 					}
 					throw err;
 				}
 				log.warn("uploadAttachment", `Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
 				await new Promise(resolve => setTimeout(resolve, delayMs));
+				current = utils.reopenAttachment(attachment);
 			}
 		}
 	}
@@ -55,12 +54,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 				};
 			}
 
-			const form = {
-				upload_1024: attachments[i],
-				voice_clip: "true"
-			};
-
-			uploads.push(retryUpload(form));
+			uploads.push(retryUpload(attachments[i]));
 		}
 
 		// resolve all promises

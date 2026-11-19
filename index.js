@@ -92,57 +92,36 @@ const MqttManager = require('./lib/mqtt/MqttManager');
 const { DatabaseManager, getInstance } = require('./lib/database/DatabaseManager');
 const { PerformanceOptimizer, getInstance: getPerformanceOptimizerInstance } = require('./lib/performance/PerformanceOptimizer');
 
-// Initialize global safety manager with ultra-low ban rate protection
-const globalSafety = new FacebookSafety({
-  enableSafeHeaders: true,
-  enableHumanBehavior: true,
-  enableAntiDetection: true,
-  enableAutoRefresh: true,
-  enableLoginValidation: true,
-  enableSafeDelays: true, // Human-like delays to reduce detection
-  bypassRegionLock: true,
-  ultraLowBanMode: false, // Disabled for stability
-  // NEXUS STABILITY: light poke (fb_dtsg refresh) every 4h instead of 30m.
-  // fb_dtsg remains valid for many hours, so 4h keeps it fresh without the
-  // fixed-pattern traffic that pushes accounts into checkpoints.
-  lightPokeIntervalMs: (function () { const n = parseInt(process.env.NEXUS_LIGHT_POKE_INTERVAL, 10); return Number.isFinite(n) && n > 0 ? n : 4 * 60 * 60 * 1000; })()
-});
+// NEXUS CONFIG: one central fca-config.json drives the whole engine.
+// On first run the full template is created; the preset controls the
+// safety/speed trade-off (safety | ultra | nexflash | none) and every
+// individual knob can be overridden in the same file.
+const NexusConfig = require('./lib/config/NexusConfig');
+const configPath = path.join(process.cwd(), "fca-config.json");
+const nexusConfig = NexusConfig.loadConfig(configPath, log);
+const config = nexusConfig.config;
+global.fca = {
+  config: config,
+  preset: nexusConfig.preset,
+  safety: nexusConfig.safety
+};
+
+// Initialize global safety manager from the resolved preset.
+const globalSafety = new FacebookSafety(NexusConfig.toSafetyOptions(nexusConfig.safety));
+global.fca.safetyManager = globalSafety;
 
 let checkVerified = null;
 const defaultLogRecordSize = 100;
 log.maxRecordSize = defaultLogRecordSize;
-const defaultConfig = {
-  // Personal use: no auto-update (supply-chain safety + manual control).
-  autoUpdate: false,
-  mqtt: {
-    enabled: true,
-    reconnectInterval: 3600,
-  }
-};
-const configPath = path.join(process.cwd(), "fca-config.json");
-let config;
-if (!fs.existsSync(configPath)) {
-  fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
-  config = defaultConfig;
-} else {
-  try {
-    const fileContent = fs.readFileSync(configPath, 'utf8');
-    config = JSON.parse(fileContent);
-    config = { ...defaultConfig, ...config };
-  } catch (err) {
-    logger("Error reading config file, using defaults", "error");
-    config = defaultConfig;
-  }
-}
-global.fca = {
-  config: config
-};
+try {
+  if (config.options && config.options.logLevel) log.level = config.options.logLevel;
+} catch (_) { }
 
 // Start the Nexus health server only when explicitly enabled.
 // Goat-Bot's login.js already owns process.env.PORT for its uptime/health page,
 // so auto-starting this one as well causes EADDRINUSE on 0.0.0.0:8000.
-if (process.env.NEXUS_ENABLE_HEALTH_SERVER === '1') {
-  const healthServer = new HealthServer();
+if (process.env.NEXUS_ENABLE_HEALTH_SERVER === '1' || (config.health && config.health.enabled)) {
+  const healthServer = new HealthServer({ port: config.health && config.health.port });
   healthServer.start();
 }
 const Boolean_Option = [
@@ -609,7 +588,9 @@ function loginHelper(appState, email, password, globalOptions, callback, prCallb
         // every 30min just added ~50 fixed-pattern page visits per day from a
         // datacenter IP, which is a classic checkpoint trigger. 6h keeps the
         // session warm (no cookie death) while removing the robotic pattern.
-        const refreshEnabled = process.env.NEXUS_COOKIE_REFRESH_ENABLED ? envBool(process.env.NEXUS_COOKIE_REFRESH_ENABLED) : true;
+        const refreshEnabled = process.env.NEXUS_COOKIE_REFRESH_ENABLED
+          ? envBool(process.env.NEXUS_COOKIE_REFRESH_ENABLED)
+          : globalSafety.options.enableAutoRefresh !== false;
         const refreshInterval = toInt(process.env.NEXUS_COOKIE_REFRESH_INTERVAL, 6 * 60 * 60 * 1000);
         const expiryDays = toInt(process.env.NEXUS_COOKIE_EXPIRY_DAYS, 90);
         const maxBackups = toInt(process.env.NEXUS_COOKIE_MAX_BACKUPS, 5);
@@ -1355,6 +1336,8 @@ async function integratedNexusLogin(credentials = null, options = {}) {
         acceptLanguage: process.env.NEXUS_ACCEPT_LANGUAGE || 'en-US,en;q=0.9',
         disablePreflight: process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true',
         appStatePath: result.appStatePath,
+        // fca-config.json defaults sit under explicit caller options.
+        ...NexusConfig.globalOptionDefaults(config),
         ...options
       };
 
@@ -1509,6 +1492,7 @@ async function login(loginData, options = {}, callback) {
         emitReady: false,
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         appStatePath: result.appStatePath,
+        ...NexusConfig.globalOptionDefaults(config),
         ...options
       };
 
@@ -1574,6 +1558,7 @@ async function login(loginData, options = {}, callback) {
       bypassRegion: options.bypassRegion || process.env.NEXUS_BYPASS_REGION,
       acceptLanguage: process.env.NEXUS_ACCEPT_LANGUAGE || 'en-US,en;q=0.9',
       disablePreflight: process.env.NEXUS_DISABLE_PREFLIGHT === '1' || process.env.NEXUS_DISABLE_PREFLIGHT === 'true',
+      ...NexusConfig.globalOptionDefaults(config),
       ...options
     };
 

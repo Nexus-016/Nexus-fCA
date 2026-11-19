@@ -3,26 +3,28 @@ var log = require("npmlog");
 var bluebird = require("bluebird");
 
 module.exports = function (defaultFuncs, api, ctx) {
-	// Helper function to retry upload with delay
-	async function retryUpload(form, maxRetries = 3, delayMs = 2000) {
+	// Helper function to retry upload with delay.
+	// Genuine Mercury uploads carry the file in the "farr" multipart field
+	// (reference: mautrix/meta + 0xzer/messagix) to
+	// <base_url>/ajax/mercury/upload.php, with cors fetch headers.
+	async function retryUpload(attachment, uploadOptions = {}) {
+		const { maxRetries, delayMs } = utils.uploadRetryPolicy();
+		let current = attachment;
 		for (let attempt = 1; attempt <= maxRetries; attempt++) {
 			try {
+				const form = utils.buildUploadForm(current, uploadOptions);
 				const res = await defaultFuncs
-					.postFormData("https://upload.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {})
+					.postFormData("https://www.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {}, {}, utils.uploadRequestOptions())
 					.then(utils.parseAndCheckLogin(ctx, defaultFuncs));
-				
+
 				if (res.error) throw res;
 				return res.payload.metadata[0];
 			} catch (err) {
-				// NEXUS ATTACHMENT FIX: the temp file is gone (caller deleted
-				// it or the OS removed it) — no retry can bring it back, so
-				// fail fast instead of stalling the send chain for
-				// maxRetries × delayMs with the same ENOENT every time.
-				const msg = String(err && (err.message || err.code || err));
-				if (err && (err.code === "ENOENT" || msg.includes("ENOENT"))) throw err;
-				if (attempt === maxRetries) throw err;
+				// 4xx = permanent rejection — fail fast.
+				if (utils.isPermanentUploadError(err) || attempt === maxRetries) throw err;
 				log.warn("uploadAttachment", `Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
 				await new Promise(resolve => setTimeout(resolve, delayMs));
+				current = utils.reopenAttachment(attachment);
 			}
 		}
 	}
@@ -42,12 +44,7 @@ module.exports = function (defaultFuncs, api, ctx) {
 				};
 			}
 
-			var form = {
-				upload_1024: attachments[i],
-				voice_clip: "true"
-			};
-
-			uploads.push(retryUpload(form));
+			uploads.push(retryUpload(attachments[i]));
 		}
 
 		// resolve all promises

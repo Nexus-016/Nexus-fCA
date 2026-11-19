@@ -46,17 +46,34 @@ api.setOptions({
 ```
 
 ### 2.2 Config file: `fca-config.json`
-A default file is stored at project root and merged with internal defaults. You can keep project-wide settings here:
+On first run the full template is written to the project root. It covers every
+programmatic option plus the safety/network/MQTT/autoLogin/vault groups. Use
+`preset` to pick the speed/safety trade-off and override individual knobs:
+
+| Preset    | Behaviour |
+|-----------|-----------|
+| `safety`  | Default. 1.2–2.5 s send pacing + every keep-alive check. |
+| `ultra`   | Very slow / maximum protection. 2.5–5 s pacing, ultra-low-ban mode. |
+| `nexflash`| Safe keep-alive features kept, sends near-instant (0–120 ms). |
+| `none`    | No safety shaping: no delays, no headers, no background timers. |
 
 ```json
 {
-  "autoUpdate": true,
-  "mqtt": { "enabled": true, "reconnectInterval": 3600 },
-  "logLevel": "warn",
-  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
-  "proxy": "http://user:pass@host:port"
+  "preset": "safety",
+  "autoUpdate": false,
+  "autoLogin": false,
+  "credentials": { "email": "", "password": "", "twofactor": "" },
+  "options": { "online": true, "selfListen": false, "autoReconnect": true, "logLevel": "info" },
+  "network": { "proxy": "", "userAgent": "", "acceptLanguage": "en-US,en;q=0.9" },
+  "mqtt": { "enabled": true, "reconnectInterval": 3600, "lsSendTimeoutMs": 15000 },
+  "safety": { "enabled": null, "sendDelay": { "min": null, "max": null }, "...": null },
+  "attachments": { "uploadField": "farr", "uploadRetries": 3, "uploadRetryDelayMs": 2000 },
+  "sessionVault": { "url": "", "token": "", "method": "", "prefer": "vault" }
 }
 ```
+
+`null` inside `safety` inherits the preset; a concrete value overrides it.
+Legacy minimal configs keep working (they receive the `safety` defaults).
 
 Note: For secrets and deployment toggles, prefer environment variables below.
 
@@ -69,6 +86,13 @@ These are read at runtime and override defaults:
   - `NEXUS_DEVICE_FILE` → path to `persistent-device.json`
   - `NEXUS_BACKUP_PATH` → directory for appstate backups
   - `NEXUS_PERSISTENT_DEVICE` → `true|false` (keep same device fingerprint)
+
+- Session vault (Koyeb/Render/Railway)
+  - `NEXUS_SESSION_VAULT_URL` → HTTP store for the freshest session
+  - `NEXUS_SESSION_VAULT_TOKEN` → Bearer token / jsonbin key
+  - `NEXUS_SESSION_VAULT_METHOD` → `PUT` or `POST`
+  - `NEXUS_SESSION_VAULT_PREFER=env` → always use `APPSTATE_JSON` instead of
+    restoring the vault copy (debug escape hatch)
 
 - Networking & headers
   - `NEXUS_PROXY` (or `HTTPS_PROXY` / `HTTP_PROXY`) → Proxy URL
@@ -144,9 +168,10 @@ Recovery steps when you see the warning:
 `fca-config.json` (project root):
 ```json
 {
-  "logLevel": "warn",
+  "preset": "nexflash",
+  "options": { "logLevel": "warn" },
   "mqtt": { "enabled": true, "reconnectInterval": 3600 },
-  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0.0.0 Safari/537.36"
+  "network": { "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0.0.0 Safari/537.36" }
 }
 ```
 
@@ -171,6 +196,16 @@ const login = require('nexus-fca');
 ---
 ## 6) Troubleshooting quick tips
 - Rapid cookie expiry: ensure persistence paths are on mounted disk; set `NEXUS_PERSISTENT_DEVICE=true`.
+- New cookie still "cookie death" after restart: the session vault may be
+  restoring an older dead copy. Check the `SESSION VAULT` log lines. Set
+  `NEXUS_SESSION_VAULT_PREFER=env` to force the deployed `APPSTATE_JSON`, or
+  clear the vault entry. Rejected fingerprints are remembered in
+  `.nexus-vault-failure.json` and will not be replayed after a restart.
+- Upload fails with `parseAndCheckLogin got status code: 400` on a media send:
+  that is a media rejection, not necessarily a dead cookie. Latest lib uses the
+  genuine Mercury upload shape (`farr` multipart field on
+  `www.facebook.com/ajax/mercury/upload.php`). Update the library; retries now
+  fail fast on 4xx instead of looping 3× every 2 s.
 - Frequent reconnect warnings: let adaptive backoff work; keep `autoReconnect=true`.
 - No replies sent: check proxy/network egress; use delivery metrics via `api.getHealthMetrics()`.
 - Noisy logs: avoid `NEXUS_VERBOSE_MQTT` unless debugging; prefer `logLevel=warn`.
